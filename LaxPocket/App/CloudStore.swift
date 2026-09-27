@@ -151,10 +151,10 @@ final class CloudStore {
     private func sync(_ id: UUID, using cloud: CloudSync) async throws {
         guard let captured = appStore.profileData(id) else { return }
         let merged = try await cloud.sync(local: captured, base: appStore.library.loadSyncBase(id))
-        try appStore.library.saveSyncBase(merged, for: id)
 
         // The profile may have been edited or removed while the sync was running.
         guard appStore.profiles.contains(where: { $0.id == id }), let current = appStore.profileData(id) else { return }
+        try appStore.library.saveSyncBase(merged, for: id)
         let result = current == captured
             ? merged
             : ProfileMerge.merge(base: ProfileSnapshot(captured), local: ProfileSnapshot(current), remote: merged).merged
