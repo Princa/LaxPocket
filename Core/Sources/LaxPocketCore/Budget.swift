@@ -66,9 +66,12 @@ public struct BudgetSummary: Equatable, Sendable {
 
 public enum BudgetMath {
     public static func summary(expenses: [Expense], budget: Double) -> BudgetSummary {
-        let spent: Double = expenses.reduce(0.0) { $0 + $1.amount }
+        var spent: Double = 0
         var totals: [ExpenseCategory: Double] = [:]
-        for expense in expenses { totals[expense.category, default: 0] += expense.amount }
+        for expense in expenses {
+            spent += expense.amount
+            totals[expense.category, default: 0] += expense.amount
+        }
         let largest: Double = totals.values.max() ?? 0
 
         var rows: [CategorySpend] = []
@@ -77,11 +80,13 @@ public enum BudgetMath {
             let relative: Double = largest > 0 ? amount / largest : 0
             rows.append(CategorySpend(category: category, amount: amount, share: share, relativeToLargest: relative))
         }
-        // Largest spend first; ties in title order so the list is stable.
-        rows.sort { (a: CategorySpend, b: CategorySpend) -> Bool in
-            if a.amount != b.amount { return a.amount > b.amount }
-            return a.category.title < b.category.title
-        }
+        rows.sort(by: Self.isOrderedBefore)
         return BudgetSummary(budget: budget, spent: spent, byCategory: rows)
+    }
+
+    /// Largest spend first; ties fall back to the category name.
+    private static func isOrderedBefore(_ a: CategorySpend, _ b: CategorySpend) -> Bool {
+        if a.amount != b.amount { return a.amount > b.amount }
+        return a.category.title < b.category.title
     }
 }
