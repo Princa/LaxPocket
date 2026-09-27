@@ -77,7 +77,6 @@ struct MetricsView: View {
                     }
                     .accessibilityLabel("Choose testing day")
                 }
-                if result.isSample { Pill(text: "Sample", background: theme.accentTint, foreground: theme.accentText) }
             }
             if !bodyLine(result).isEmpty {
                 Text(bodyLine(result)).font(.system(size: 13)).foregroundStyle(AppTheme.caption)

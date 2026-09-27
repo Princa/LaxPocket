@@ -13,6 +13,7 @@ struct LogSessionView: View {
     @State private var effort = 6
     @State private var focus: Set<String> = []
     @State private var notes = ""
+    @State private var showAddProgram = false
 
     private var programs: [Program] {
         store.data.programs.filter { $0.sessionCategory == category }
@@ -35,8 +36,14 @@ struct LogSessionView: View {
                                 programButton(program)
                             }
                             if programs.isEmpty {
-                                Text("No programs for this type yet.")
+                                Text("No \(category.title.lowercased()) programs yet.")
                                     .font(.system(size: 14)).foregroundStyle(AppTheme.caption)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            Button { showAddProgram = true } label: {
+                                Label("Add a program", systemImage: "plus")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             }
                         }
                     }
@@ -117,8 +124,18 @@ struct LogSessionView: View {
                     Button("Save", action: save).fontWeight(.bold).disabled(selectedProgramID == nil)
                 }
             }
+            .sheet(isPresented: $showAddProgram) { ProgramEditorView(group: programGroup) }
             .onChange(of: category) { _, _ in programID = programs.first?.id }
             .onAppear { if programID == nil { programID = programs.first?.id } }
+        }
+    }
+
+    /// The Programs group a new program for this session type goes in.
+    private var programGroup: ProgramGroup {
+        switch category {
+        case .team: return .teams
+        case .skills: return .skills
+        case .fitness: return .fitness
         }
     }
 

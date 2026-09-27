@@ -335,16 +335,14 @@ public struct CombineResult: Identifiable, Codable, Hashable, Sendable {
     public var measurements: [CombineMeasurement]
     public var heightText: String
     public var weightText: String
-    public var isSample: Bool
 
-    public init(id: UUID = UUID(), date: Date, event: String, measurements: [CombineMeasurement], heightText: String = "", weightText: String = "", isSample: Bool = false) {
+    public init(id: UUID = UUID(), date: Date, event: String, measurements: [CombineMeasurement], heightText: String = "", weightText: String = "") {
         self.id = id
         self.date = date
         self.event = event
         self.measurements = measurements
         self.heightText = heightText
         self.weightText = weightText
-        self.isSample = isSample
     }
 
     public func value(for metric: CombineMetric) -> Double? {

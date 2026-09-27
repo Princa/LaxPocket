@@ -302,27 +302,43 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Sample-data notice with a way out.
-struct SampleBanner: View {
+/// First-run nudge on Home while a profile has no programs yet.
+struct GettingStartedCard: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        if store.data.isSample {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "info.circle.fill").foregroundStyle(theme.accentText)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("You're looking at a sample season.")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Explore, then start fresh from Settings to log your own.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(AppTheme.ink2)
+        if store.data.programs.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "sparkles").foregroundStyle(theme.accentText)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Set up \(store.profile.seasonTitle)")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Add the teams, coaches and facilities \(athlete) trains with. Sessions, hours and the budget all hang off them.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppTheme.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                NavigationLink { ProgramsView() } label: {
+                    Label("Add programs", systemImage: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(.white)
+                        .background(theme.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
             .padding(14)
             .background(theme.accentTint, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+    }
+
+    private var athlete: String {
+        let name = store.profile.firstName.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "the athlete" : name
     }
 }
 

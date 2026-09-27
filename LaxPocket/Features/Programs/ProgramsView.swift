@@ -4,6 +4,14 @@ import LaxPocketCore
 struct ProgramsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
+    @State private var editing: EditTarget?
+
+    /// Which program the editor sheet is for.
+    private struct EditTarget: Identifiable {
+        let id = UUID()
+        var program: Program?
+        var group: ProgramGroup = .teams
+    }
 
     var body: some View {
         let hours = store.data.hoursByProgram
@@ -12,6 +20,19 @@ struct ProgramsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ScreenTitle(text: "Programs")
                     Text("Teams, coaches & facilities · hours this season").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                }
+                if store.data.programs.isEmpty {
+                    Card {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("No programs yet").font(.system(size: 17, weight: .semibold))
+                            Text("Add each team, private coach, gym or facility, plus showcases, the mental coach and combine testing. Sessions are logged against them.")
+                                .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Add a program") { editing = EditTarget() }
+                                .buttonStyle(PrimaryButtonStyle(color: theme.primary))
+                                .padding(.top, 6)
+                        }
+                    }
                 }
                 ForEach(ProgramGroup.allCases) { group in
                     let programs = store.data.programs.filter { $0.group == group }
@@ -34,6 +55,13 @@ struct ProgramsView: View {
         }
         .background(AppTheme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { editing = EditTarget() } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add a program")
+            }
+        }
+        .sheet(item: $editing) { target in ProgramEditorView(program: target.program, group: target.group) }
     }
 
     @ViewBuilder
@@ -49,13 +77,21 @@ struct ProgramsView: View {
         }
         .padding(.vertical, 12)
 
-        switch group {
-        case .mental:
-            NavigationLink { MindsetView() } label: { content }.buttonStyle(.plain)
-        case .combine:
-            Button { store.selectedTab = .metrics } label: { content }.buttonStyle(.plain)
-        default:
-            content
+        Group {
+            switch group {
+            case .mental:
+                NavigationLink { MindsetView() } label: { content }.buttonStyle(.plain)
+            case .combine:
+                Button { store.selectedTab = .metrics } label: { content }.buttonStyle(.plain)
+            default:
+                Button { editing = EditTarget(program: program) } label: { content }.buttonStyle(.plain)
+            }
+        }
+        .contextMenu {
+            Button { editing = EditTarget(program: program) } label: { Label("Edit", systemImage: "pencil") }
+            if store.canDeleteProgram(program.id) {
+                Button(role: .destructive) { store.deleteProgram(program.id) } label: { Label("Delete", systemImage: "trash") }
+            }
         }
     }
 

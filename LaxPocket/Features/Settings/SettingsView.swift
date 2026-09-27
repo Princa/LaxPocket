@@ -18,6 +18,23 @@ struct SettingsView: View {
                     Text("Colours inspired by the top 10 D1 women's lacrosse programs (\(ThemeCatalog.source)). The app icon switches to match. No school logos or marks are used.")
                 }
 
+                Section {
+                    NavigationLink { ProfilesView() } label: {
+                        HStack(spacing: 12) {
+                            ProfileAvatar(summary: store.data.summary, size: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(store.data.summary.displayName).font(.system(size: 15, weight: .semibold))
+                                Text(store.profiles.count == 1 ? "1 athlete on this iPhone" : "\(store.profiles.count) athletes on this iPhone")
+                                    .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Athletes")
+                } footer: {
+                    Text("Switch, add or remove athletes. The settings below are for \(store.data.summary.displayName).")
+                }
+
                 Section("Theme") {
                     ForEach(ThemeCatalog.all) { palette in
                         Button { store.setTheme(palette) } label: {
@@ -28,7 +45,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Athlete") {
+                Section("Athlete profile") {
                     TextField("First name", text: binding(\.profile.firstName))
                         .textContentType(.givenName)
                     TextField("Class of", value: binding(\.profile.classYear), format: .number.grouping(.never))
@@ -54,11 +71,10 @@ struct SettingsView: View {
 
                 Section {
                     Button("Start a blank season", role: .destructive) { confirmBlank = true }
-                    Button("Reload the sample season") { store.reloadSampleSeason() }
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Everything is stored only on this iPhone. A blank season keeps your programs, profile and theme.")
+                    Text("Each athlete’s data is stored separately on this iPhone. A blank season keeps \(store.data.summary.displayName)’s programs, profile and theme.")
                 }
             }
             .navigationTitle("Theme & settings")

@@ -5,6 +5,7 @@ struct EventsView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
     @State private var teamFilter: String?
+    @State private var editing: SeasonEvent?
 
     var body: some View {
         let events = store.data.events
@@ -13,12 +14,24 @@ struct EventsView: View {
         let record = Season.record(for: events)
         let upcoming = Season.upcoming(filtered, from: store.now)
         let results = Season.results(filtered)
+        let past = Season.past(filtered, from: store.now)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ScreenTitle(text: "Events")
-                    Text("Games, tournaments & showcases").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                HStack {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ScreenTitle(text: "Events")
+                        Text("Games, tournaments & showcases").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                    }
+                    Spacer()
+                    Button { editing = EventEditorView.newEvent(team: teamFilter ?? "") } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(theme.primary, in: Circle())
+                    }
+                    .accessibilityLabel("Add an event")
                 }
 
                 recordCard(record)
@@ -36,8 +49,23 @@ struct EventsView: View {
                     SectionHeader(title: "Upcoming").padding(.top, 8)
                     Card(padding: 0) {
                         ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, event in
-                            upcomingRow(event).padding(.horizontal, 14)
+                            Button { editing = event } label: { upcomingRow(event).padding(.horizontal, 14) }
+                                .buttonStyle(.plain)
                             if index < upcoming.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                        }
+                    }
+                }
+
+                if !past.isEmpty {
+                    SectionHeader(title: "Past") {
+                        Text("Tap to add a result").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                    }
+                    .padding(.top, 8)
+                    Card(padding: 0) {
+                        ForEach(Array(past.enumerated()), id: \.element.id) { index, event in
+                            Button { editing = event } label: { upcomingRow(event).padding(.horizontal, 14) }
+                                .buttonStyle(.plain)
+                            if index < past.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
                 }
@@ -58,9 +86,10 @@ struct EventsView: View {
                     }
                 }
 
-                if upcoming.isEmpty && results.isEmpty {
+                if upcoming.isEmpty && results.isEmpty && past.isEmpty {
                     Card {
-                        Text("No events yet for this filter.").font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                        Text(events.isEmpty ? "No events yet. Tap + to add a game, tournament, showcase or camp." : "No events yet for this filter.")
+                            .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
                     }
                 }
             }
@@ -69,6 +98,7 @@ struct EventsView: View {
         }
         .background(AppTheme.background)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $editing) { event in EventEditorView(event: event) }
     }
 
     private func recordCard(_ record: SeasonRecord) -> some View {

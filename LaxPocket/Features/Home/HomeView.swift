@@ -6,6 +6,7 @@ struct HomeView: View {
     @Environment(\.appTheme) private var theme
     @State private var showLogSession = false
     @State private var showSettings = false
+    @State private var showNewProfile = false
 
     var body: some View {
         let data = store.data
@@ -28,7 +29,7 @@ struct HomeView: View {
                     weekCard(hours: weekHours, now: now, ratio: ratio)
                         .padding(.top, -60)
 
-                    SampleBanner()
+                    GettingStartedCard()
 
                     HStack(spacing: 10) {
                         Button { store.selectedTab = .training } label: {
@@ -84,6 +85,7 @@ struct HomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showLogSession) { LogSessionView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showNewProfile) { NewProfileView() }
     }
 
     // MARK: - Pieces
@@ -95,6 +97,7 @@ struct HomeView: View {
                 Wordmark(theme: theme)
                 Spacer()
                 HStack(spacing: 8) {
+                    profileMenu
                     Button {
                         showSettings = true
                     } label: {
@@ -125,6 +128,26 @@ struct HomeView: View {
         .background(alignment: .bottom) {
             theme.primary.frame(height: 2000)
         }
+    }
+
+    private var profileMenu: some View {
+        Menu {
+            Section("Athletes") {
+                ForEach(store.profiles) { summary in
+                    Button { store.switchProfile(to: summary.id) } label: {
+                        if summary.id == store.data.id {
+                            Label(summary.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(summary.displayName)
+                        }
+                    }
+                }
+            }
+            Button { showNewProfile = true } label: { Label("Add athlete", systemImage: "person.badge.plus") }
+        } label: {
+            headerIcon(store.profiles.count > 1 ? "person.2" : "person")
+        }
+        .accessibilityLabel("Switch athlete")
     }
 
     private var profileLine: String {

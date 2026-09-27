@@ -19,6 +19,19 @@ final class SeasonTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(events[0].stats?.shootingPercentage), 0.4, accuracy: 1e-9)
         XCTAssertEqual(Season.upcoming(events, from: now).map(\.title), ["D"])
         XCTAssertEqual(Season.results(events).count, 3)
+        XCTAssertTrue(Season.past(events, from: now).isEmpty)
+    }
+
+    func testPastEventsWithoutAResult() {
+        let now = Date()
+        let events = [
+            SeasonEvent(kind: .game, title: "Scored", team: "T", date: now.addingTimeInterval(-86_400), ourScore: 3, theirScore: 2),
+            SeasonEvent(kind: .game, title: "Needs score", team: "T", date: now.addingTimeInterval(-86_400)),
+            SeasonEvent(kind: .camp, title: "Camp", team: "T", date: now.addingTimeInterval(-3 * 86_400), endDate: now.addingTimeInterval(-2 * 86_400)),
+            SeasonEvent(kind: .tournament, title: "Still on", team: "T", date: now.addingTimeInterval(-86_400), endDate: now.addingTimeInterval(86_400))
+        ]
+        XCTAssertEqual(Season.past(events, from: now).map(\.title), ["Needs score", "Camp"])
+        XCTAssertEqual(Season.upcoming(events, from: now).map(\.title), ["Still on"])
     }
 }
 
@@ -79,31 +92,91 @@ final class ThemeTests: XCTestCase {
 }
 
 final class AppDataTests: XCTestCase {
-    func testSampleDataRoundTripsThroughJSON() throws {
-        let data = SampleData.make()
-        XCTAssertTrue(data.isSample)
-        XCTAssertFalse(data.sessions.isEmpty)
-        XCTAssertTrue(data.sessions.allSatisfy { $0.date <= Date() })
+    func testRoundTripsThroughJSON() throws {
+        let data = Fixtures.season()
         let json = try AppData.encoder.encode(data)
         let decoded = try AppData.decoder.decode(AppData.self, from: json)
+        XCTAssertEqual(decoded.id, data.id)
         XCTAssertEqual(decoded.sessions.count, data.sessions.count)
         XCTAssertEqual(decoded.profile, data.profile)
         XCTAssertEqual(decoded.events.map(\.title), data.events.map(\.title))
+        XCTAssertEqual(decoded.themeID, "northwestern")
     }
 
-    func testBlankSeasonKeepsProgramsOnly() {
-        let blank = SampleData.make().blankSeason()
-        XCTAssertFalse(blank.isSample)
+    /// Version 1 files had no profile ID and carried an `isSample` flag.
+    func testReadsVersion1Files() throws {
+        let json = """
+        {"schemaVersion": 1, "isSample": false, "seasonBudget": 500, "themeID": "navy",
+         "profile": {"firstName": "Sam", "classYear": 2031, "positions": "Attack", "benchmarkGroup": "u15Women",
+                     "mentalCoachName": "", "weeklyGoalHours": 10, "season": "2026/27"},
+         "programs": [], "sessions": [], "events": [], "expenses": [], "docs": [],
+         "combineResults": [{"id": "3F2504E0-4F89-11D3-9A0C-0305E82C3301", "date": "2026-09-01T10:00:00Z", "event": "Baseline",
+                             "measurements": [{"metric": "gripLeft", "value": 262}], "heightText": "", "weightText": "", "isSample": true}]}
+        """
+        let data = try AppData.decoder.decode(AppData.self, from: Data(json.utf8))
+        XCTAssertEqual(data.schemaVersion, AppData.currentSchemaVersion)
+        XCTAssertEqual(data.profile.firstName, "Sam")
+        XCTAssertEqual(data.seasonBudget, 500)
+        XCTAssertEqual(data.themeID, "navy")
+        XCTAssertEqual(data.combineResults.first?.value(for: .gripLeft), 262)
+    }
+
+    func testBlankSeasonKeepsProfileAndPrograms() {
+        let season = Fixtures.season()
+        let blank = season.blankSeason()
+        XCTAssertEqual(blank.id, season.id)
+        XCTAssertEqual(blank.profile, season.profile)
+        XCTAssertEqual(blank.programs, season.programs)
+        XCTAssertEqual(blank.seasonBudget, season.seasonBudget)
         XCTAssertTrue(blank.sessions.isEmpty)
         XCTAssertTrue(blank.events.isEmpty)
-        XCTAssertFalse(blank.programs.isEmpty)
+        XCTAssertTrue(blank.expenses.isEmpty)
+        XCTAssertTrue(blank.docs.isEmpty)
+        XCTAssertTrue(blank.combineResults.isEmpty)
+    }
+
+    func testNewProfileStartsEmpty() {
+        let profile = AthleteProfile(firstName: "Sam", classYear: 2031, positions: "", benchmarkGroup: .u15Women, season: "2026/27")
+        let data = AppData.newProfile(profile, themeID: "navy")
+        XCTAssertTrue(data.programs.isEmpty)
+        XCTAssertTrue(data.sessions.isEmpty)
+        XCTAssertEqual(data.summary, ProfileSummary(id: data.id, name: "Sam", themeID: "navy"))
     }
 
     func testSeasonTitle() {
-        var profile = SampleData.make().profile
+        var profile = Fixtures.season().profile
         profile.firstName = "Sam"
         XCTAssertEqual(profile.seasonTitle, "Sam’s Season")
         profile.firstName = " "
         XCTAssertEqual(profile.seasonTitle, "My Season")
+    }
+
+    func testSeasonLabelTurnsOverInAugust() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Toronto")!
+        func date(_ y: Int, _ m: Int) -> Date { calendar.date(from: DateComponents(year: y, month: m, day: 15))! }
+        XCTAssertEqual(AthleteProfile.seasonLabel(for: date(2026, 9), calendar: calendar), "2026/27")
+        XCTAssertEqual(AthleteProfile.seasonLabel(for: date(2027, 3), calendar: calendar), "2026/27")
+        XCTAssertEqual(AthleteProfile.seasonLabel(for: date(2027, 8), calendar: calendar), "2027/28")
+        XCTAssertEqual(AthleteProfile.seasonLabel(for: date(2099, 12), calendar: calendar), "2099/00")
+    }
+
+    func testProgramMonograms() {
+        XCTAssertEqual(Program.suggestedMonogram(for: "Team Ontario U15"), "TOU")
+        XCTAssertEqual(Program.suggestedMonogram(for: "Rockstar 2031"), "R31")
+        XCTAssertEqual(Program.suggestedMonogram(for: "The Quarry Fitness Training"), "TQF")
+        XCTAssertEqual(Program.suggestedMonogram(for: "OAA"), "OAA")
+        XCTAssertEqual(Program.suggestedMonogram(for: "DodgeCity"), "DC")
+        XCTAssertEqual(Program.suggestedMonogram(for: "quarry"), "Q")
+        XCTAssertEqual(Program.suggestedMonogram(for: "  "), "?")
+        XCTAssertEqual(Program.defaultCategory(for: .skills), .skills)
+        XCTAssertNil(Program.defaultCategory(for: .showcases))
+        XCTAssertNotEqual(Program.newID(), Program.newID())
+    }
+
+    func testSessionCountByProgram() {
+        let data = Fixtures.season()
+        XCTAssertEqual(data.sessionCountByProgram["club"], 1)
+        XCTAssertNil(data.sessionCountByProgram["combine"])
     }
 }
