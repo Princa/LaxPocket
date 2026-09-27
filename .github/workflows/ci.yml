@@ -15,18 +15,18 @@ jobs:
     name: Core tests (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Swift version
         run: swift --version
       - name: Test LaxPocketCore
         working-directory: Core
-        run: swift test
+        run: ../scripts/ci-run.sh "Core tests (Linux)" ../core-tests-linux.log swift test
 
   ios-build:
     name: iOS app build (macOS)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Xcode version
         run: xcodebuild -version
       - name: Install XcodeGen
@@ -35,14 +35,15 @@ jobs:
         run: xcodegen generate
       - name: Core tests (macOS)
         working-directory: Core
-        run: swift test
+        run: ../scripts/ci-run.sh "Core tests (macOS)" ../core-tests-macos.log swift test
       - name: Build app for iOS Simulator
+        # Runs even when the Core tests fail, so one CI run reports both.
+        if: success() || failure()
         run: |
-          set -o pipefail
-          xcodebuild -project LaxPocket.xcodeproj -scheme LaxPocket \
+          scripts/ci-run.sh "iOS build" build.log \
+            xcodebuild -project LaxPocket.xcodeproj -scheme LaxPocket \
             -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 \
-            | tee build.log | grep -E "(error|warning): |\*\* BUILD"
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build
       - name: Upload build log and generated project
         if: always()
         uses: actions/upload-artifact@v4
@@ -50,5 +51,6 @@ jobs:
           name: build-output
           path: |
             build.log
+            core-tests-macos.log
             LaxPocket.xcodeproj
           if-no-files-found: ignore
