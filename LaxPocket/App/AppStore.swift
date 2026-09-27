@@ -114,7 +114,8 @@ final class AppStore {
 
     // MARK: - Persistence
 
-    static var defaultFileURL: URL {
+    /// `nonisolated` so it can be the default argument of `init` (defaults are evaluated off the main actor).
+    nonisolated static var defaultFileURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("LaxPocket", isDirectory: true).appendingPathComponent("season.json")
