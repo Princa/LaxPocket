@@ -200,11 +200,16 @@ struct TierBandView: View {
 
     /// Scale ends in the metric's units, worse (left) to better (right), padded around the cut-offs and the result.
     private var scale: (worse: Double, better: Double) {
-        let span = max(abs(thresholds.elite - thresholds.competitive), 1e-6)
+        let gap: Double = abs(thresholds.elite - thresholds.competitive)
+        let pad: Double = max(gap, 1e-6) * 1.2
         if metric.lowerIsBetter {
-            return (max(thresholds.competitive, value) + span * 1.2, min(thresholds.elite, value) - span * 1.2)
+            let worse: Double = max(thresholds.competitive, value) + pad
+            let better: Double = min(thresholds.elite, value) - pad
+            return (worse, better)
         }
-        return (min(thresholds.competitive, value) - span * 1.2, max(thresholds.elite, value) + span * 1.2)
+        let worse: Double = min(thresholds.competitive, value) - pad
+        let better: Double = max(thresholds.elite, value) + pad
+        return (worse, better)
     }
 
     private func position(_ x: Double) -> Double {
@@ -312,9 +317,11 @@ private struct BalanceCard: View {
                 Card {
                     VStack(alignment: .leading, spacing: 18) {
                         if let l = gripL, let r = gripR {
-                            let weaker = l < r ? "Left" : "Right"
-                            let diff = abs(l - r)
-                            let pct = max(l, r) > 0 ? diff / max(l, r) * 100 : 0
+                            let weaker: String = l < r ? "Left" : "Right"
+                            let diff: Double = abs(l - r)
+                            let stronger: Double = max(l, r)
+                            let pct: Double = stronger > 0 ? diff / stronger * 100 : 0
+                            let barMax: Double = stronger * 1.1
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text("Grip strength").font(.system(size: 15, weight: .semibold))
@@ -322,8 +329,8 @@ private struct BalanceCard: View {
                                     Text(diff < 1 ? "Even" : "\(weaker) \(Int(diff)) N (\(Int(pct.rounded()))%) lower")
                                         .font(.system(size: 13, weight: .bold)).foregroundStyle(theme.accentText)
                                 }
-                                balanceBar("Left", l, max(l, r) * 1.1, color: l < r ? theme.accent : theme.primary, text: CombineMetric.gripLeft.format(l))
-                                balanceBar("Right", r, max(l, r) * 1.1, color: r < l ? theme.accent : theme.primary, text: CombineMetric.gripRight.format(r))
+                                balanceBar("Left", l, barMax, color: l < r ? theme.accent : theme.primary, text: CombineMetric.gripLeft.format(l))
+                                balanceBar("Right", r, barMax, color: r < l ? theme.accent : theme.primary, text: CombineMetric.gripRight.format(r))
                             }
                         }
                         if let l = agiL, let r = agiR {
