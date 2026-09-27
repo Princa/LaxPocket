@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Test LaxPocketCore
+        working-directory: Core
+        run: swift test
+
+  ios-build:
+    name: iOS app build (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Core tests (macOS)
+        working-directory: Core
+        run: swift test
+      - name: Build app for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project LaxPocket.xcodeproj -scheme LaxPocket \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | tee build.log | grep -E "(error|warning): |\*\* BUILD"
+      - name: Upload build log and generated project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            build.log
+            LaxPocket.xcodeproj
+          if-no-files-found: ignore

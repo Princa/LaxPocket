@@ -1,0 +1,61 @@
+# XcodeGen spec — run `xcodegen generate` to create LaxPocket.xcodeproj
+name: LaxPocket
+options:
+  bundleIdPrefix: com.princa
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+packages:
+  LaxPocketCore:
+    path: Core
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  LaxPocket:
+    type: application
+    platform: iOS
+    sources:
+      - path: LaxPocket
+    dependencies:
+      - package: LaxPocketCore
+    info:
+      path: LaxPocket/Info.plist
+      properties:
+        CFBundleDisplayName: LaxPocket
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.princa.laxpocket
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_PREVIEWS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: >-
+          AppIcon-Northwestern AppIcon-NorthCarolina AppIcon-JohnsHopkins AppIcon-Maryland AppIcon-Colorado
+          AppIcon-StonyBrook AppIcon-Stanford AppIcon-Navy AppIcon-Michigan AppIcon-Syracuse
+
+schemes:
+  LaxPocket:
+    build:
+      targets:
+        LaxPocket: all
+    run:
+      config: Debug
+    archive:
+      config: Release
