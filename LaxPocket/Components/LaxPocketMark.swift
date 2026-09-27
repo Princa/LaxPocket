@@ -71,9 +71,10 @@ struct LaxPocketMark: View {
                 box = CGRect(x: 50 - 59.52, y: 50 - 59.52, width: 119.05, height: 119.05)
                 widths = (2.6, 6, 7, 7)
             }
-            let scale = min(size.width / box.width, size.height / box.height)
-            let transform = CGAffineTransform(translationX: size.width / 2 - box.midX * scale, y: size.height / 2 - box.midY * scale)
-                .scaledBy(x: scale, y: scale)
+            let scale: CGFloat = min(size.width / box.width, size.height / box.height)
+            let dx: CGFloat = size.width / 2 - box.midX * scale
+            let dy: CGFloat = size.height / 2 - box.midY * scale
+            let transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
 
             context.stroke(MarkPaths.strings.applying(transform), with: .color(frameColor.opacity(0.7)),
                            style: StrokeStyle(lineWidth: widths.strings * scale))
