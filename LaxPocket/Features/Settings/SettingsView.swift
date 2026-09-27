@@ -4,6 +4,7 @@ import LaxPocketCore
 /// Theme picker plus athlete profile and data controls.
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(CloudStore.self) private var cloud
     @Environment(\.dismiss) private var dismiss
     @State private var confirmBlank = false
 
@@ -33,6 +34,16 @@ struct SettingsView: View {
                     Text("Athletes")
                 } footer: {
                     Text("Switch, add or remove athletes. The settings below are for \(store.data.summary.displayName).")
+                }
+
+                Section {
+                    NavigationLink { CloudSyncView() } label: {
+                        LabeledContent {
+                            Text(cloudStatus)
+                        } label: {
+                            Label("Cloud sync", systemImage: cloud.isSignedIn ? "checkmark.icloud" : "icloud")
+                        }
+                    }
                 }
 
                 Section("Theme") {
@@ -74,7 +85,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Each athlete’s data is stored separately on this iPhone. A blank season keeps \(store.data.summary.displayName)’s programs, profile and theme.")
+                    Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, profile and theme.")
                 }
             }
             .navigationTitle("Theme & settings")
@@ -90,6 +101,13 @@ struct SettingsView: View {
         }
         .tint(theme.primary)
         .environment(\.appTheme, theme)
+    }
+
+    private var cloudStatus: String {
+        if !cloud.isConfigured { return "Off" }
+        if !cloud.isSignedIn { return "Signed out" }
+        if cloud.isSyncing { return "Syncing…" }
+        return cloud.lastError == nil ? "On" : "Error"
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppData, Value>) -> Binding<Value> {

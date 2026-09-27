@@ -4,7 +4,9 @@ import LaxPocketCore
 /// First launch: no athlete profiles yet.
 struct WelcomeView: View {
     @Environment(\.appTheme) private var theme
+    @Environment(CloudStore.self) private var cloud
     @State private var showNew = false
+    @State private var showCloud = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -28,12 +30,17 @@ struct WelcomeView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 Label("Add a profile for each athlete in the family. Their data stays separate.", systemImage: "person.2")
-                Label("Everything is stored on this iPhone.", systemImage: "lock")
+                Label(cloud.isConfigured ? "Stored on this iPhone, with optional cloud sync." : "Everything is stored on this iPhone.", systemImage: "lock")
                 Button { showNew = true } label: {
                     Label("Create an athlete profile", systemImage: "plus")
                 }
                 .buttonStyle(PrimaryButtonStyle(color: theme.primary))
                 .padding(.top, 6)
+                if cloud.isConfigured {
+                    Button("Already use LaxPocket? Sign in to bring your athletes over") { showCloud = true }
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
             }
             .font(.system(size: 14))
             .foregroundStyle(AppTheme.ink2)
@@ -41,5 +48,13 @@ struct WelcomeView: View {
             .background(AppTheme.background.ignoresSafeArea(edges: .bottom))
         }
         .sheet(isPresented: $showNew) { NewProfileView() }
+        .sheet(isPresented: $showCloud) {
+            NavigationStack {
+                CloudSyncView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { showCloud = false } }
+                    }
+            }
+        }
     }
 }

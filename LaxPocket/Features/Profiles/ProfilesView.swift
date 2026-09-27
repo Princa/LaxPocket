@@ -4,6 +4,7 @@ import LaxPocketCore
 /// Lists the athlete profiles on this iPhone: switch, add or remove.
 struct ProfilesView: View {
     @Environment(AppStore.self) private var store
+    @Environment(CloudStore.self) private var cloud
     @State private var showNew = false
     @State private var pendingDelete: ProfileSummary?
 
@@ -32,7 +33,9 @@ struct ProfilesView: View {
         .confirmationDialog(deleteTitle, isPresented: deleteBinding, titleVisibility: .visible, presenting: pendingDelete) { summary in
             Button("Delete \(summary.displayName)", role: .destructive) { store.deleteProfile(summary.id) }
         } message: { summary in
-            Text("Removes \(summary.displayName)’s profile, sessions, results, events, expenses and linked docs from this iPhone. This can’t be undone.")
+            Text(cloud.isSignedIn
+                 ? "Removes \(summary.displayName) from this iPhone. The copy in your cloud account stays; delete it from Cloud sync if you want it gone everywhere."
+                 : "Removes \(summary.displayName)’s profile, sessions, results, events, expenses and linked docs from this iPhone. This can’t be undone.")
         }
     }
 

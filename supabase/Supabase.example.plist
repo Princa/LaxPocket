@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Copy to LaxPocket/Resources/Supabase.plist (git-ignored) and fill in the project URL and
+  anon (publishable) key from the Supabase dashboard (the project's Connect button, or
+  Project Settings → API Keys). Then run `xcodegen generate` and rebuild.
+  The anon / publishable key is safe to ship in the app; row-level security protects the data.
+-->
+<plist version="1.0">
+<dict>
+	<key>SupabaseURL</key>
+	<string>https://YOUR-PROJECT-REF.supabase.co</string>
+	<key>SupabaseAnonKey</key>
+	<string>YOUR-ANON-OR-PUBLISHABLE-KEY</string>
+</dict>
+</plist>

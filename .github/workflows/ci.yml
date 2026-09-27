@@ -22,6 +22,38 @@ jobs:
         working-directory: Core
         run: ../scripts/ci-run.sh "Core tests (Linux)" ../core-tests-linux.log swift test
 
+  supabase:
+    name: Supabase schema & sync (Linux)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v5
+      - name: Schema and row-level security checks
+        run: scripts/ci-run.sh "Supabase schema" schema.log supabase/tests/run-local.sh
+      - name: Start PostgREST
+        shell: bash
+        run: supabase/tests/start-postgrest.sh | sed 's/^export //' >> "$GITHUB_ENV"
+      - name: Sync against PostgREST
+        working-directory: Core
+        env:
+          LAXPOCKET_E2E_REQUIRED: "1"
+        run: ../scripts/ci-run.sh "Cloud sync (PostgREST)" ../sync.log swift test --filter CloudSyncIntegrationTests
+      - name: PostgREST log
+        if: failure()
+        run: docker logs laxpocket-postgrest || true
+
   ios-build:
     name: iOS app build (macOS)
     runs-on: macos-15
@@ -31,6 +63,9 @@ jobs:
         run: xcodebuild -version
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Add a placeholder Supabase.plist
+        # Makes sure a real one would be bundled; its placeholder values leave cloud sync off.
+        run: cp supabase/Supabase.example.plist LaxPocket/Resources/Supabase.plist
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Core tests (macOS)
@@ -42,8 +77,10 @@ jobs:
         run: |
           scripts/ci-run.sh "iOS build" build.log \
             xcodebuild -project LaxPocket.xcodeproj -scheme LaxPocket \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             -configuration Debug CODE_SIGNING_ALLOWED=NO build
+      - name: Check Supabase.plist is bundled
+        run: test -f build/Build/Products/Debug-iphonesimulator/LaxPocket.app/Supabase.plist
       - name: Upload build log and generated project
         if: always()
         uses: actions/upload-artifact@v4

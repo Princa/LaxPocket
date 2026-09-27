@@ -18,6 +18,7 @@ Built with SwiftUI for iOS 17+.
 | **Budget** | Spend against the season budget, by category, plus recent expenses. |
 | **Programs** | Teams, coaches and facilities, with hours logged at each. Add, edit or remove them here. |
 | **Mental game** | Google Drive documents shared with the mental performance coach, a "to review" queue, folders, and link-a-doc. Docs open in Google Docs or Word for editing. |
+| **Cloud sync** | Optional. Sign in to back up every athlete to Supabase and keep phones in sync; share an athlete with a parent's or coach's account. See [docs/supabase.md](docs/supabase.md). |
 | **Theme & settings** | 11 colour themes (the original plus the final 2026 D1 women's top 10), each with a matching alternate app icon. Also the athletes list, the active athlete's profile, weekly goal, budget, and a blank-season reset. |
 
 ## Getting started
@@ -47,7 +48,9 @@ Core/                     LaxPocketCore Swift package: models and logic, no UI
     MentalDocs.swift      Drive document links, type detection
     Themes.swift          11 palettes + WCAG contrast maths
     Profiles.swift        athlete profile list + one JSON file per athlete
+    Cloud/                Supabase rows, three-way merge, REST client, sync
   Tests/                  XCTest suite (runs on macOS and Linux)
+supabase/                 Supabase project: schema migration, CLI config, schema + sync tests
 LaxPocket/                SwiftUI app
   App/                    app entry, store (per-athlete JSON files), tabs
   Theme/  Components/     colours, logo mark, shared views
@@ -55,17 +58,20 @@ LaxPocket/                SwiftUI app
   Resources/Assets.xcassets  app icon + 10 alternate theme icons
 ```
 
+Cloud sync is off until you add your Supabase project's URL and key. [docs/supabase.md](docs/supabase.md) walks through creating the **LaxPocket** project, applying the schema and connecting the app.
+
 The logic lives in `LaxPocketCore` so it can be unit-tested without a simulator:
 
 ```bash
 cd Core && swift test
 ```
 
-CI (GitHub Actions) runs the Core tests on Linux and macOS, and builds the app for the iOS Simulator on every push.
+CI (GitHub Actions) runs the Core tests on Linux and macOS, builds the app for the iOS Simulator, and checks the Supabase schema, access rules and sync against a real PostgREST on every push.
 
 ## Data and privacy
 
-- Each athlete's data is stored in its own JSON file in the app's Application Support folder (`LaxPocket/profiles/<id>.json`, with `profiles.json` listing them), with iOS file protection turned on. There's no server or analytics.
+- Each athlete's data is stored in its own JSON file in the app's Application Support folder (`LaxPocket/profiles/<id>.json`, with `profiles.json` listing them), with iOS file protection turned on. There are no analytics.
+- Cloud sync is opt-in and goes only to your own Supabase project. Row-level security limits each account to the athletes it owns or that were shared with it. The sign-in session is kept in the iOS Keychain.
 - The repository holds **no personal data** and the app ships with no sample data. Test fixtures use made-up numbers. The athlete's real results are entered in the app and stay on the phone.
 - Upgrading from 0.1 moves the old `season.json` into a profile. The built-in sample season is dropped rather than imported.
 - Mental-game documents stay in Google Drive. The app only stores the link, title and folder.
@@ -78,7 +84,8 @@ CI (GitHub Actions) runs the Core tests on Linux and macOS, and builds the app f
 ## Roadmap
 
 - [ ] Google Drive picker (Drive API) instead of pasting share links
-- [ ] iCloud sync between the athlete's and a parent's phone
+- [x] Sync between the athlete's and a parent's phone (Supabase)
+- [ ] Sign in with Apple
 - [ ] Combine re-test trend charts once there are several testing days
 - [ ] Home-screen widget: this week's hours and the next event
 - [ ] Season review export (PDF) for end-of-year meetings

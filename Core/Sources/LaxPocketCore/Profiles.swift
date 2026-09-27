@@ -59,6 +59,7 @@ public struct ProfileIndex: Codable, Equatable, Sendable {
 ///
 ///     <directory>/profiles.json          which profiles exist, in order, and the active one
 ///     <directory>/profiles/<id>.json     one `AppData` per athlete
+///     <directory>/sync/<id>.json         see `loadSyncBase(_:)`
 public struct ProfileLibrary {
     public let directory: URL
     /// Extra options for every write, e.g. `.completeFileProtection` on iOS.
@@ -115,10 +116,11 @@ public struct ProfileLibrary {
         try write(data, to: profileURL(data.id))
     }
 
-    /// Removes the profile's data from this device.
+    /// Removes the profile's data, and its sync record, from this device.
     public func deleteProfile(_ id: UUID) throws {
         let url = profileURL(id)
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        try removeSyncBase(id)
     }
 
     // MARK: - Version 1 files

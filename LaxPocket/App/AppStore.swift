@@ -17,7 +17,7 @@ final class AppStore {
     var selectedTab: AppTab = .home
     let library: ProfileLibrary
     /// Called after the user changes a profile's data, with that profile's ID. Cloud sync listens here.
-    @ObservationIgnored var onLocalChange: ((UUID) -> Void)?
+    @ObservationIgnored var onLocalChange: (@MainActor (UUID) -> Void)?
 
     init(library: ProfileLibrary = AppStore.defaultLibrary, legacyFileURL: URL? = AppStore.legacyFileURL) {
         self.library = library
