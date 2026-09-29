@@ -155,6 +155,8 @@ struct HomeView: View {
         var parts = [p.season]
         if let year = p.classYear { parts.append("Class of \(year)") }
         if !p.positions.isEmpty { parts.append(p.positions) }
+        let clubs = store.data.clubs.map(\.name)
+        if !clubs.isEmpty { parts.append(clubs.joined(separator: ", ")) }
         return parts.joined(separator: " · ")
     }
 

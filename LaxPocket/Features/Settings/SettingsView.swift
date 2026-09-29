@@ -66,6 +66,9 @@ struct SettingsView: View {
                         ForEach(BenchmarkGroup.allCases) { Text($0.title).tag($0) }
                     }
                     TextField("Mental coach's name", text: binding(\.profile.mentalCoachName))
+                    NavigationLink { ClubsView() } label: {
+                        LabeledContent("Clubs & teams", value: clubSummary)
+                    }
                 }
 
                 Section("Season") {
@@ -101,6 +104,15 @@ struct SettingsView: View {
         }
         .tint(theme.primary)
         .environment(\.appTheme, theme)
+    }
+
+    private var clubSummary: String {
+        let clubs = store.data.clubs
+        switch clubs.count {
+        case 0: return "None"
+        case 1: return clubs[0].name
+        default: return "\(clubs.count) clubs"
+        }
     }
 
     private var cloudStatus: String {

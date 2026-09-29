@@ -88,8 +88,20 @@ public struct AppData: Codable, Equatable, Sendable {
     }
 
     /// A new, empty profile for an athlete.
-    public static func newProfile(_ profile: AthleteProfile, themeID: String = ThemeCatalog.defaultID) -> AppData {
-        AppData(profile: profile, themeID: themeID)
+    /// - Parameter clubs: clubs and teams the athlete plays for, e.g. ("Club 2031", "Club team"). Blank names are skipped.
+    public static func newProfile(_ profile: AthleteProfile, themeID: String = ThemeCatalog.defaultID,
+                                  clubs: [(name: String, detail: String)] = []) -> AppData {
+        let programs = clubs.compactMap { club -> Program? in
+            let name = club.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return Program.club(name: name, detail: club.detail.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return AppData(profile: profile, programs: programs, themeID: themeID)
+    }
+
+    /// The clubs and teams the athlete plays for: programs in the Teams & leagues group.
+    public var clubs: [Program] {
+        programs.filter { $0.group == .teams }
     }
 
     /// Stand-in shown while no profile exists yet. Never saved.

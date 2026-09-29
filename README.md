@@ -10,7 +10,7 @@ Built with SwiftUI for iOS 17+.
 
 | Tab / screen | What it does |
 |---|---|
-| **Athletes** | One profile per athlete, each with its own sessions, results, events, budget, docs and theme. Switch from the Home header or **Theme & settings → Athletes**. |
+| **Athletes** | One profile per athlete, each with its own clubs and teams, sessions, results, events, budget, docs and theme. Switch from the Home header or **Theme & settings → Athletes**; edit clubs under **Athlete profile → Clubs & teams**. |
 | **Home** | This week's hours split into Team / Skills / Fitness against a weekly goal, a load ratio, season totals, what's up next, and showcase prep. |
 | **Training** | Weekly and season hours by category (Swift Charts), an acute : chronic workload gauge, and a session log. **Log session** captures program, duration, effort (RPE 1–10), focus tags and notes. |
 | **Metrics** | Combine results scored against the **NDTP 2026 Fitness Standards** (Developing / Competitive / Elite) with the gap to the next tier, a comparison against the next age group, and a left-vs-right balance check. |

@@ -143,6 +143,17 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(data.summary, ProfileSummary(id: data.id, name: "Sam", themeID: "navy"))
     }
 
+    func testNewProfileWithClubs() {
+        let profile = AthleteProfile(firstName: "Sam", classYear: 2031, positions: "", benchmarkGroup: .u15Women, season: "2026/27")
+        let data = AppData.newProfile(profile, clubs: [("Club 2031", "Club team"), ("  ", "ignored"), (" Team Ontario U15 ", "")])
+        XCTAssertEqual(data.clubs.map(\.name), ["Club 2031", "Team Ontario U15"])
+        XCTAssertEqual(data.clubs.first?.detail, "Club team")
+        XCTAssertTrue(data.clubs.allSatisfy { $0.group == .teams && $0.sessionCategory == .team })
+        XCTAssertEqual(data.clubs.last?.monogram, "TOU")
+        XCTAssertNotEqual(data.clubs[0].id, data.clubs[1].id)
+        XCTAssertEqual(Fixtures.season().clubs.map(\.id), ["club"])
+    }
+
     func testSeasonTitle() {
         var profile = Fixtures.season().profile
         profile.firstName = "Sam"

@@ -60,6 +60,11 @@ public struct Program: Identifiable, Codable, Hashable, Sendable {
         self.monogram = monogram
     }
 
+    /// A club or team the athlete plays for; its sessions count as team hours.
+    public static func club(name: String, detail: String = "") -> Program {
+        Program(id: newID(), name: name, detail: detail, group: .teams, sessionCategory: .team, monogram: suggestedMonogram(for: name))
+    }
+
     /// A fresh ID for a program added in the app.
     public static func newID() -> String {
         UUID().uuidString.lowercased()
