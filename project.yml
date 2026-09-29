@@ -22,8 +22,8 @@ targets:
     type: application
     platform: iOS
     sources:
-      # Also picks up LaxPocket/Resources/Supabase.plist (git-ignored) when it exists; without it,
-      # cloud sync is off. See docs/supabase.md.
+      # Includes LaxPocket/Resources/Supabase.plist, which points the app at the LaxPocket
+      # Supabase project; without it, cloud sync is off. See docs/supabase.md.
       - path: LaxPocket
     dependencies:
       - package: LaxPocketCore

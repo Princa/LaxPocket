@@ -63,9 +63,9 @@ jobs:
         run: xcodebuild -version
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Add a placeholder Supabase.plist
-        # Makes sure a real one would be bundled; its placeholder values leave cloud sync off.
-        run: cp supabase/Supabase.example.plist LaxPocket/Resources/Supabase.plist
+      - name: Supabase.plist present
+        # A fork without one gets the placeholder, which leaves cloud sync off.
+        run: test -f LaxPocket/Resources/Supabase.plist || cp supabase/Supabase.example.plist LaxPocket/Resources/Supabase.plist
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Core tests (macOS)

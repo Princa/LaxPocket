@@ -23,7 +23,5 @@ Package.resolved
 *.season.json
 season.json
 
-# Supabase project URL and key for your own build (see docs/supabase.md)
-LaxPocket/Resources/Supabase.plist
 supabase/.temp/
 supabase/.branches/

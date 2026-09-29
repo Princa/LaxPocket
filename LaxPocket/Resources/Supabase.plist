@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The LaxPocket Supabase project. The publishable key is meant to ship in the app;
+  row-level security decides what each signed-in account can see. See docs/supabase.md.
+-->
+<plist version="1.0">
+<dict>
+	<key>SupabaseURL</key>
+	<string>https://xoepfhvesnttrggakfbf.supabase.co</string>
+	<key>SupabaseAnonKey</key>
+	<string>sb_publishable_HMty_SSpGNDnfoYDdNfdXw_Eu7zVI9x</string>
+</dict>
+</plist>
