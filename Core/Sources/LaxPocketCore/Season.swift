@@ -238,4 +238,9 @@ public enum Season {
     public static func results(_ events: [SeasonEvent]) -> [SeasonEvent] {
         events.filter(\.hasResult).sorted { $0.date > $1.date }
     }
+
+    /// Events that are over but have no score: games waiting for a result, plus past showcases and camps. Newest first.
+    public static func past(_ events: [SeasonEvent], from date: Date) -> [SeasonEvent] {
+        events.filter { !$0.hasResult && ($0.endDate ?? $0.date) < date }.sorted { $0.date > $1.date }
+    }
 }

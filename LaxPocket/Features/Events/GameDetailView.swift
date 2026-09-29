@@ -5,6 +5,8 @@ struct GameDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
+    @State private var showEdit = false
     let eventID: UUID
 
     var body: some View {
@@ -61,6 +63,10 @@ struct GameDetailView: View {
             }
             .background(AppTheme.background)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { Button("Edit") { showEdit = true } }
+            }
+            .sheet(isPresented: $showEdit) { EventEditorView(event: event, onDelete: { dismiss() }) }
         } else {
             ContentUnavailableView("Event not found", systemImage: "calendar.badge.exclamationmark")
         }
@@ -151,7 +157,7 @@ struct GameDetailView: View {
         var updated = event
         if let index = updated.focus.firstIndex(where: { $0.id == goalID }) {
             updated.focus[index].outcome = outcome
-            store.updateEvent(updated)
+            store.saveEvent(updated)
         }
     }
 

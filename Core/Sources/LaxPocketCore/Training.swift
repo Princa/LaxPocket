@@ -59,6 +59,39 @@ public struct Program: Identifiable, Codable, Hashable, Sendable {
         self.sessionCategory = sessionCategory
         self.monogram = monogram
     }
+
+    /// A fresh ID for a program added in the app.
+    public static func newID() -> String {
+        UUID().uuidString.lowercased()
+    }
+
+    /// Badge letters from a name: the first letter of up to three words, plus a trailing number's last two digits,
+    /// e.g. "Team Ontario U15" → "TOU", "Rockstar 2031" → "R31", "DodgeCity" → "DC", "OAA" → "OAA".
+    public static func suggestedMonogram(for name: String) -> String {
+        let words = name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        let named = words.filter { $0.first?.isLetter == true }
+        var letters: String
+        if named.count == 1, let word = named.first {
+            let capitals = word.filter(\.isUppercase)
+            letters = word.count <= 3 && word == word.uppercased() ? word : (capitals.count >= 2 ? String(capitals) : String(word.prefix(1)).uppercased())
+        } else {
+            letters = named.prefix(3).compactMap(\.first).map { String($0).uppercased() }.joined()
+        }
+        if let number = words.last, number.allSatisfy(\.isNumber), letters.count < 3 {
+            letters += String(number.suffix(2))
+        }
+        return letters.isEmpty ? "?" : String(letters.prefix(3))
+    }
+
+    /// The session category a program in this group usually counts toward.
+    public static func defaultCategory(for group: ProgramGroup) -> SessionCategory? {
+        switch group {
+        case .teams: return .team
+        case .skills: return .skills
+        case .fitness: return .fitness
+        case .showcases, .mental, .combine: return nil
+        }
+    }
 }
 
 /// One logged practice, lesson or workout.

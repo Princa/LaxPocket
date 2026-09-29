@@ -25,12 +25,23 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         let name = firstName.trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? "My Season" : "\(name)’s Season"
     }
+
+    /// The season a date falls in. Seasons start in August, so Sep 2026 → "2026/27" and Mar 2027 → "2026/27".
+    public static func seasonLabel(for date: Date, calendar: Calendar = .laxWeek) -> String {
+        let year = calendar.component(.year, from: date)
+        let month = calendar.component(.month, from: date)
+        let start = month >= 8 ? year : year - 1
+        return String(format: "%d/%02d", start, (start + 1) % 100)
+    }
 }
 
-/// Everything the app stores, saved as one JSON file on the device.
+/// Everything stored for one athlete profile, saved as its own JSON file on the device.
 public struct AppData: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    /// 1: single season file with a sample season. 2: one file per athlete profile.
+    public static let currentSchemaVersion = 2
 
+    /// The athlete profile's ID. Also the profile's ID in the cloud.
+    public var id: UUID
     public var schemaVersion: Int
     public var profile: AthleteProfile
     public var programs: [Program]
@@ -41,10 +52,9 @@ public struct AppData: Codable, Equatable, Sendable {
     public var seasonBudget: Double
     public var docs: [MentalDoc]
     public var themeID: String
-    /// True while the app is showing the built-in sample season.
-    public var isSample: Bool
 
-    public init(profile: AthleteProfile, programs: [Program], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], themeID: String = ThemeCatalog.defaultID, isSample: Bool = false) {
+    public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], themeID: String = ThemeCatalog.defaultID) {
+        self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
         self.programs = programs
@@ -55,7 +65,42 @@ public struct AppData: Codable, Equatable, Sendable {
         self.seasonBudget = seasonBudget
         self.docs = docs
         self.themeID = themeID
-        self.isSample = isSample
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, themeID
+    }
+
+    /// Reads current files and version 1 season files, which had no `id`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        schemaVersion = AppData.currentSchemaVersion
+        profile = try c.decode(AthleteProfile.self, forKey: .profile)
+        programs = try c.decodeIfPresent([Program].self, forKey: .programs) ?? []
+        sessions = try c.decodeIfPresent([TrainingSession].self, forKey: .sessions) ?? []
+        combineResults = try c.decodeIfPresent([CombineResult].self, forKey: .combineResults) ?? []
+        events = try c.decodeIfPresent([SeasonEvent].self, forKey: .events) ?? []
+        expenses = try c.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
+        seasonBudget = try c.decodeIfPresent(Double.self, forKey: .seasonBudget) ?? 0
+        docs = try c.decodeIfPresent([MentalDoc].self, forKey: .docs) ?? []
+        themeID = try c.decodeIfPresent(String.self, forKey: .themeID) ?? ThemeCatalog.defaultID
+    }
+
+    /// A new, empty profile for an athlete.
+    public static func newProfile(_ profile: AthleteProfile, themeID: String = ThemeCatalog.defaultID) -> AppData {
+        AppData(profile: profile, themeID: themeID)
+    }
+
+    /// Stand-in shown while no profile exists yet. Never saved.
+    public static let placeholder = AppData(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+        profile: AthleteProfile(firstName: "", classYear: nil, positions: "", benchmarkGroup: .u15Women, season: AthleteProfile.seasonLabel(for: Date()))
+    )
+
+    /// Name and theme, for the profile list.
+    public var summary: ProfileSummary {
+        ProfileSummary(id: id, name: profile.firstName, themeID: themeID)
     }
 
     public func program(id: String) -> Program? {
@@ -74,11 +119,16 @@ public struct AppData: Codable, Equatable, Sendable {
         return totals
     }
 
-    /// A clean season with the same programs and profile, no logged data.
+    /// Number of sessions logged with each program.
+    public var sessionCountByProgram: [String: Int] {
+        var counts: [String: Int] = [:]
+        for session in sessions { counts[session.programID, default: 0] += 1 }
+        return counts
+    }
+
+    /// A clean season for the same athlete: keeps the profile, programs, budget and theme, drops logged data.
     public func blankSeason() -> AppData {
-        var copy = AppData(profile: profile, programs: programs, seasonBudget: seasonBudget, themeID: themeID)
-        copy.profile.firstName = profile.firstName
-        return copy
+        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, themeID: themeID)
     }
 
     public static let encoder: JSONEncoder = {

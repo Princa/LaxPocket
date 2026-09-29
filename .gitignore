@@ -22,3 +22,6 @@ Package.resolved
 # Local season data exports — never commit personal data
 *.season.json
 season.json
+
+supabase/.temp/
+supabase/.branches/

@@ -13,9 +13,22 @@ struct RootView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        @Bindable var store = store
         let theme = AppTheme(palette: store.palette)
-        TabView(selection: $store.selectedTab) {
+        Group {
+            if store.hasProfile {
+                tabs
+            } else {
+                WelcomeView()
+            }
+        }
+        .tint(theme.primary)
+        .environment(\.appTheme, theme)
+        .preferredColorScheme(.light)
+    }
+
+    private var tabs: some View {
+        @Bindable var store = store
+        return TabView(selection: $store.selectedTab) {
             NavigationStack { HomeView() }
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(AppTab.home)
@@ -32,8 +45,7 @@ struct RootView: View {
                 .tabItem { Label("Budget", systemImage: "wallet.pass") }
                 .tag(AppTab.budget)
         }
-        .tint(theme.primary)
-        .environment(\.appTheme, theme)
-        .preferredColorScheme(.light)
+        // A fresh set of screens per athlete, so no screen keeps state from the previous profile.
+        .id(store.data.id)
     }
 }
