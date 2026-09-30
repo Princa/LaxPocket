@@ -377,6 +377,23 @@ begin
 end
 $$;
 
+-- Mental sessions with the mental performance coach are their own session category.
+insert into public.programs (profile_id, id, name, program_group, session_category)
+values ('10000000-0000-4000-8000-000000000001', 'mental-coach', 'Mental coach', 'mental', 'mental');
+insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort, focus)
+values ('10000000-0000-4000-8000-000000000001', 'mental-coach', '2026-09-24T17:00:00Z', 'mental', 45, 4, '{"Game plan"}');
+do $$
+begin
+  assert (select count(*) from public.training_sessions where category = 'mental') = 1, 'mental sessions are accepted';
+  begin
+    insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort)
+    values ('10000000-0000-4000-8000-000000000001', 'mental-coach', now(), 'yoga', 30, 3);
+    raise exception 'unknown session category was accepted';
+  exception when check_violation then null;
+  end;
+end
+$$;
+
 delete from public.profiles where id = '10000000-0000-4000-8000-000000000001';
 
 reset role;

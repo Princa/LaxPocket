@@ -37,11 +37,18 @@ struct AppTheme {
     static let border = Color(hex: "#DDD9D0")
     static let chevron = Color(hex: "#8A8D95")
 
+    // Mental sessions use the same calm teal in every theme. No school palette uses green,
+    // so it stays distinct from the team, skills and fitness colours.
+    static let mental = Color(hex: "#3E9A87")
+    static let mentalTint = Color(hex: "#E2F1EC")
+    static let mentalText = Color(hex: "#1F6B5E")
+
     func color(for category: SessionCategory) -> Color {
         switch category {
         case .team: return primary
         case .skills: return accent
         case .fitness: return third
+        case .mental: return AppTheme.mental
         }
     }
 
@@ -50,6 +57,7 @@ struct AppTheme {
         case .team: return (primaryTint, primary)
         case .skills: return (accentTint, accentText)
         case .fitness: return (primaryTint, primary)
+        case .mental: return (AppTheme.mentalTint, AppTheme.mentalText)
         }
     }
 

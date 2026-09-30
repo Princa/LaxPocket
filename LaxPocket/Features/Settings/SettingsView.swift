@@ -167,6 +167,7 @@ private struct ThemePreview: View {
                     LegendDot(color: theme.color(for: .team), label: "Team")
                     LegendDot(color: theme.color(for: .skills), label: "Skills")
                     LegendDot(color: theme.color(for: .fitness), label: "Fitness")
+                    LegendDot(color: theme.color(for: .mental), label: "Mental")
                 }
                 HStack(spacing: 6) {
                     TierBadge(tier: .elite)

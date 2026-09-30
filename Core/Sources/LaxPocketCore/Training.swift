@@ -1,10 +1,12 @@
 import Foundation
 
-/// The three buckets every training session is counted in.
+/// The buckets every training session is counted in.
 public enum SessionCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case team
     case skills
     case fitness
+    /// Sessions with the mental performance coach: game plans, pre-game preparation, visualisation.
+    case mental
 
     public var id: String { rawValue }
 
@@ -13,6 +15,7 @@ public enum SessionCategory: String, Codable, CaseIterable, Identifiable, Sendab
         case .team: return "Team"
         case .skills: return "Skills"
         case .fitness: return "Fitness"
+        case .mental: return "Mental"
         }
     }
 }
@@ -89,8 +92,15 @@ public struct Program: Identifiable, Codable, Hashable, Sendable {
         case .teams: return .team
         case .skills: return .skills
         case .fitness: return .fitness
-        case .showcases, .mental, .combine: return nil
+        case .mental: return .mental
+        case .showcases, .combine: return nil
         }
+    }
+
+    /// The category sessions with this program are logged under. Mental performance programs saved before
+    /// mental sessions existed have no category, so they count as mental.
+    public var loggedCategory: SessionCategory? {
+        sessionCategory ?? (group == .mental ? .mental : nil)
     }
 }
 
@@ -136,6 +146,16 @@ public struct TrainingSession: Identifiable, Codable, Hashable, Sendable {
         "Stick skills", "Shooting", "Dodging", "Draw controls",
         "Defence", "Ground balls", "Conditioning", "Strength"
     ]
+
+    public static let mentalFocusOptions = [
+        "Game plan", "Pre-game routine", "Visualisation", "Confidence",
+        "Focus & reset", "Handling pressure", "Goal setting", "Game review"
+    ]
+
+    /// Focus tags offered when logging a session of this category.
+    public static func focusOptions(for category: SessionCategory) -> [String] {
+        category == .mental ? mentalFocusOptions : focusOptions
+    }
 }
 
 public extension Calendar {

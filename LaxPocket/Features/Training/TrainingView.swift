@@ -24,7 +24,9 @@ struct TrainingView: View {
         let weekSessions = Workload.sessions(sessions, inWeekOf: anchor, calendar: calendar).sorted { $0.date > $1.date }
         let recent = Workload.weeks(endingAt: anchor, count: 5, sessions: sessions, calendar: calendar)
         let current = recent.last?.hours ?? CategoryHours()
-        let ratio = Workload.acuteChronicRatio(currentWeekHours: current.total, previousWeekHours: recent.dropLast().map(\.hours.total))
+        // Total hours against recent weeks for the summary; physical hours only for the workload gauge.
+        let change = Workload.acuteChronicRatio(currentWeekHours: current.total, previousWeekHours: recent.dropLast().map(\.hours.total))
+        let ratio = Workload.acuteChronicRatio(currentWeekHours: current.physical, previousWeekHours: recent.dropLast().map(\.hours.physical))
         let chartWeeks = Workload.weeks(endingAt: anchor, count: range == .week ? 6 : seasonWeekCount(sessions), sessions: sessions, calendar: calendar)
         let seasonHours = Workload.hours(for: sessions)
 
@@ -65,11 +67,11 @@ struct TrainingView: View {
 
                 summaryCard(hours: range == .week ? current : seasonHours,
                             sessionCount: range == .week ? weekSessions.count : sessions.count,
-                            ratio: range == .week ? ratio : nil,
+                            ratio: range == .week ? change : nil,
                             weeks: chartWeeks)
 
                 if range == .week, let ratio {
-                    workloadCard(ratio: ratio, current: current.total, previous: recent.dropLast().map(\.hours.total))
+                    workloadCard(ratio: ratio, current: current.physical, previous: recent.dropLast().map(\.hours.physical))
                 }
 
                 if range == .week {
@@ -158,7 +160,7 @@ struct TrainingView: View {
                     Text(String(format: "%.2f", ratio)).font(.display(36)).foregroundStyle(theme.primary)
                 }
                 WorkloadGauge(ratio: ratio)
-                Text("\(Formatters.hours(current)) h this week against an average of \(Formatters.hours(average)) h. \(Workload.advice(for: zone))")
+                Text("\(Formatters.hours(current)) h of physical training this week against an average of \(Formatters.hours(average)) h. \(Workload.advice(for: zone))")
                     .font(.system(size: 14))
                     .foregroundStyle(AppTheme.ink2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -176,7 +178,7 @@ struct TrainingView: View {
             .padding(.top, 10)
             if sessions.isEmpty {
                 Card {
-                    Text("Nothing logged this week yet. Tap + to add a practice, lesson or workout.")
+                    Text("Nothing logged this week yet. Tap + to add a practice, lesson, workout or mental session.")
                         .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
                 }
             }
@@ -277,7 +279,8 @@ struct WeeklyHoursChart: View {
         .chartForegroundStyleScale([
             SessionCategory.team.title: theme.color(for: .team),
             SessionCategory.skills.title: theme.color(for: .skills),
-            SessionCategory.fitness.title: theme.color(for: .fitness)
+            SessionCategory.fitness.title: theme.color(for: .fitness),
+            SessionCategory.mental.title: theme.color(for: .mental)
         ])
         .chartLegend(.hidden)
         .chartYAxis {

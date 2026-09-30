@@ -100,7 +100,8 @@ struct ProgramsView: View {
         switch group {
         case .mental:
             HStack(spacing: 6) {
-                Text("\(store.data.docs.count) docs").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.muted)
+                let docs = "\(store.data.docs.count) docs"
+                Text((hours ?? 0) > 0 ? "\(Formatters.hours(hours ?? 0)) h · \(docs)" : docs).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.muted)
                 Image(systemName: "chevron.right").foregroundStyle(AppTheme.chevron)
             }
         case .combine:

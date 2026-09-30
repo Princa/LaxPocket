@@ -15,7 +15,7 @@ struct HomeView: View {
         let weekSessions = Workload.sessions(data.sessions, inWeekOf: now)
         let weekHours = Workload.hours(for: weekSessions)
         let weeks = Workload.weeks(endingAt: now, count: 5, sessions: data.sessions)
-        let ratio = Workload.acuteChronicRatio(currentWeekHours: weekHours.total, previousWeekHours: weeks.dropLast().map(\.hours.total))
+        let ratio = Workload.acuteChronicRatio(currentWeekHours: weekHours.physical, previousWeekHours: weeks.dropLast().map(\.hours.physical))
         let record = Season.record(for: data.events)
         let budget = BudgetMath.summary(expenses: data.expenses, budget: data.seasonBudget)
         let upcoming = Array(Season.upcoming(data.events, from: now).prefix(4))

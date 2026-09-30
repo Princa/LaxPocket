@@ -19,7 +19,7 @@ struct ProgramEditorView: View {
         _name = State(initialValue: program?.name ?? "")
         _detail = State(initialValue: program?.detail ?? "")
         _group = State(initialValue: program?.group ?? group)
-        _category = State(initialValue: program == nil ? Program.defaultCategory(for: group) : program?.sessionCategory)
+        _category = State(initialValue: program == nil ? Program.defaultCategory(for: group) : program?.loggedCategory)
         _monogram = State(initialValue: program?.monogram ?? "")
     }
 
@@ -46,7 +46,10 @@ struct ProgramEditorView: View {
                 Section {
                     Picker("Sessions count as", selection: $category) {
                         ForEach(SessionCategory.allCases) { Text($0.title).tag(SessionCategory?.some($0)) }
-                        Text("Not logged").tag(SessionCategory?.none)
+                        // Mental performance programs always log sessions (see Program.loggedCategory).
+                        if group != .mental {
+                            Text("Not logged").tag(SessionCategory?.none)
+                        }
                     }
                 } footer: {
                     Text("Programs with a session type show up in Log session and count toward that part of the weekly hours.")

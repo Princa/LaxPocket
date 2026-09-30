@@ -34,6 +34,19 @@ final class WorkloadTests: XCTestCase {
         XCTAssertEqual(sessions[0].load, 630)
     }
 
+    func testMentalHoursCountTowardTotalButNotPhysical() {
+        let sessions = [
+            TrainingSession(date: date(2026, 9, 21), programID: "a", category: .team, minutes: 90, effort: 7),
+            TrainingSession(date: date(2026, 9, 24), programID: "m", category: .mental, minutes: 45, effort: 4, focus: ["Game plan"])
+        ]
+        let hours = Workload.hours(for: sessions)
+        XCTAssertEqual(hours.mental, 0.75, accuracy: 1e-9)
+        XCTAssertEqual(hours[.mental], 0.75, accuracy: 1e-9)
+        XCTAssertEqual(hours.total, 2.25, accuracy: 1e-9)
+        XCTAssertEqual(hours.physical, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(hours.share(of: .mental), 0.75 / 2.25, accuracy: 1e-9)
+    }
+
     func testWeeksAreOldestFirstAndBucketed() {
         let sessions = [
             TrainingSession(date: date(2026, 9, 14), programID: "a", category: .team, minutes: 60, effort: 5),

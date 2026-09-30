@@ -1,24 +1,30 @@
 import Foundation
 
-/// Hours split across the three session categories.
+/// Hours split across the session categories.
 public struct CategoryHours: Equatable, Sendable {
     public var team: Double
     public var skills: Double
     public var fitness: Double
+    public var mental: Double
 
-    public init(team: Double = 0, skills: Double = 0, fitness: Double = 0) {
+    public init(team: Double = 0, skills: Double = 0, fitness: Double = 0, mental: Double = 0) {
         self.team = team
         self.skills = skills
         self.fitness = fitness
+        self.mental = mental
     }
 
-    public var total: Double { team + skills + fitness }
+    public var total: Double { team + skills + fitness + mental }
+
+    /// Hours that load the body: everything except mental sessions. Used for the workload ratio.
+    public var physical: Double { team + skills + fitness }
 
     public subscript(category: SessionCategory) -> Double {
         switch category {
         case .team: return team
         case .skills: return skills
         case .fitness: return fitness
+        case .mental: return mental
         }
     }
 
@@ -72,6 +78,7 @@ public enum Workload {
             case .team: result.team += session.hours
             case .skills: result.skills += session.hours
             case .fitness: result.fitness += session.hours
+            case .mental: result.mental += session.hours
             }
         }
         return result
@@ -99,6 +106,7 @@ public enum Workload {
     }
 
     /// Acute : chronic ratio — this week's hours over the average of the previous weeks.
+    /// Pass physical hours (`CategoryHours.physical`) so mental sessions don't move it.
     /// Returns nil when there is no history to compare against.
     public static func acuteChronicRatio(currentWeekHours: Double, previousWeekHours: [Double]) -> Double? {
         guard !previousWeekHours.isEmpty else { return nil }
