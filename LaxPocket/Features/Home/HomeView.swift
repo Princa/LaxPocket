@@ -56,6 +56,11 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
 
+                    NavigationLink { HealthView() } label: {
+                        healthRow(growth: BodyTrends.growthRate(data.bodyMeasurements))
+                    }
+                    .buttonStyle(.plain)
+
                     if !upcoming.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             SectionHeader(title: "Up next") {
@@ -155,6 +160,7 @@ struct HomeView: View {
         var parts = [p.season]
         if let year = p.classYear { parts.append("Class of \(year)") }
         if !p.positions.isEmpty { parts.append(p.positions) }
+        if let height = BodyTrends.heights(store.data.bodyMeasurements).last { parts.append(p.bodyUnits.formatHeight(height.value)) }
         return parts.joined(separator: " · ")
     }
 
@@ -221,6 +227,34 @@ struct HomeView: View {
         .padding(20)
         .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.08), radius: 14, y: 8)
+    }
+
+    private func healthRow(growth: GrowthRate?) -> some View {
+        let units = store.profile.bodyUnits
+        var detail = BodyTrends.summary(store.data.bodyMeasurements, units: units) ?? "Log height and weight to track growth"
+        if let growth { detail += " · growing \(units.formatGrowthRate(growth.cmPerYear))" }
+        return HStack(spacing: 14) {
+            Image(systemName: "heart.text.square")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(theme.primary)
+                .frame(width: 44, height: 44)
+                .background(theme.primaryTint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Health").font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                Text(detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.caption)
+            }
+            Spacer()
+            if growth?.isSpurtPace == true {
+                Circle().fill(theme.accent).frame(width: 10, height: 10)
+                    .accessibilityLabel("Growth-spurt pace")
+            }
+            Image(systemName: "chevron.right").foregroundStyle(AppTheme.chevron)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func mentalGameRow(docCount: Int, toReview: Int) -> some View {

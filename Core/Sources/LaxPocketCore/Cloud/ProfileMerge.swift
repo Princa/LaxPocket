@@ -24,6 +24,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var events = TableChanges<EventBundle, UUID>()
     public var expenses = TableChanges<ExpenseRow, UUID>()
     public var docs = TableChanges<MentalDocRow, UUID>()
+    public var bodyMeasurements = TableChanges<BodyMeasurementRow, UUID>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -31,6 +32,7 @@ public struct SyncChanges: Hashable, Sendable {
 
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
+            && bodyMeasurements.isEmpty
     }
 }
 
@@ -62,6 +64,7 @@ public enum ProfileMerge {
             changes.events.upserts = local.events
             changes.expenses.upserts = local.expenses
             changes.docs.upserts = local.docs
+            changes.bodyMeasurements.upserts = local.bodyMeasurements
             return Outcome(merged: local, changes: changes)
         }
 
@@ -83,9 +86,12 @@ public enum ProfileMerge {
         changes.expenses = TableChanges(upserts: expenses.upserts, deletes: expenses.deletes)
         let docs = rows(base: base?.docs ?? [], local: local.docs, remote: remote.docs, key: \.id)
         changes.docs = TableChanges(upserts: docs.upserts, deletes: docs.deletes)
+        let body = rows(base: base?.bodyMeasurements ?? [], local: local.bodyMeasurements, remote: remote.bodyMeasurements, key: \.id)
+        changes.bodyMeasurements = TableChanges(upserts: body.upserts, deletes: body.deletes)
 
         let merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
-                                     combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged)
+                                     combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
+                                     bodyMeasurements: body.merged)
         return Outcome(merged: merged, changes: changes)
     }
 

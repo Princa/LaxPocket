@@ -66,6 +66,13 @@ struct SettingsView: View {
                         ForEach(BenchmarkGroup.allCases) { Text($0.title).tag($0) }
                     }
                     TextField("Mental coach's name", text: binding(\.profile.mentalCoachName))
+                    NavigationLink { HealthView() } label: {
+                        LabeledContent("Height & weight",
+                                       value: BodyTrends.summary(store.data.bodyMeasurements, units: store.profile.bodyUnits) ?? "Not logged")
+                    }
+                    Picker("Units", selection: binding(\.profile.bodyUnits)) {
+                        ForEach(BodyUnits.allCases) { Text($0.title).tag($0) }
+                    }
                 }
 
                 Section("Season") {
@@ -85,7 +92,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, profile and theme.")
+                    Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, profile, height and weight history and theme.")
                 }
             }
             .navigationTitle("Theme & settings")
@@ -96,7 +103,7 @@ struct SettingsView: View {
             .confirmationDialog("Start a blank season?", isPresented: $confirmBlank, titleVisibility: .visible) {
                 Button("Clear sessions, results, events, expenses and docs", role: .destructive) { store.startBlankSeason() }
             } message: {
-                Text("Your programs, profile and theme stay.")
+                Text("Your programs, profile, height and weight history and theme stay.")
             }
         }
         .tint(theme.primary)

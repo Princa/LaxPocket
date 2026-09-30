@@ -120,6 +120,30 @@ final class ProfileMergeTests: XCTestCase {
         XCTAssertTrue(outcome.merged.events.isEmpty)
     }
 
+    func testHeightAndWeightMergeLikeOtherRows() {
+        var local = season
+        local.bodyMeasurements.append(BodyMeasurement(date: Fixtures.day(7), heightCm: 160.4))
+        local.bodyMeasurements[0].note = "Morning"
+        var remote = season
+        remote.bodyMeasurements.remove(at: 2)
+        remote.profile.bodyUnits = .imperial
+
+        let outcome = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: ProfileSnapshot(remote))
+        XCTAssertEqual(Set(outcome.changes.bodyMeasurements.upserts.map(\.id)), [local.bodyMeasurements[0].id, local.bodyMeasurements[3].id])
+        XCTAssertTrue(outcome.changes.bodyMeasurements.deletes.isEmpty)
+        XCTAssertNil(outcome.changes.profile, "the units change came from the cloud")
+        let merged = outcome.merged.appData
+        XCTAssertEqual(merged.bodyMeasurements.count, 3)
+        XCTAssertFalse(merged.bodyMeasurements.contains { $0.id == season.bodyMeasurements[2].id })
+        XCTAssertEqual(merged.bodyMeasurements.first?.note, "Morning")
+        XCTAssertEqual(merged.profile.bodyUnits, .imperial)
+
+        local = season
+        local.bodyMeasurements.removeAll()
+        let deleted = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: base)
+        XCTAssertEqual(Set(deleted.changes.bodyMeasurements.deletes), Set(season.bodyMeasurements.map(\.id)))
+    }
+
     /// An event merges as one unit: editing a goal re-sends the whole event with its children.
     func testEventChildrenTravelWithTheEvent() {
         var local = season

@@ -183,7 +183,7 @@ struct ShareAthleteView: View {
                         .autocorrectionDisabled()
                     Toggle("Can make changes", isOn: $canEdit)
                 } footer: {
-                    Text(canEdit ? "They can log sessions, results, events and expenses for \(summary.displayName)."
+                    Text(canEdit ? "They can log sessions, results, events, expenses and height and weight for \(summary.displayName)."
                                  : "They can see \(summary.displayName)’s data but not change it.")
                 }
                 if let message {

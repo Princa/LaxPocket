@@ -12,6 +12,7 @@ struct NewProfileView: View {
     @State private var season = AthleteProfile.seasonLabel(for: Date())
     @State private var weeklyGoal = 12.0
     @State private var themeID = ThemeCatalog.defaultID
+    @State private var bodyInput = BodyInput(units: .imperial)
 
     private var trimmedName: String { firstName.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -34,6 +35,8 @@ struct NewProfileView: View {
                     Text("Combine results are scored against these NDTP standards.")
                 }
 
+                BodyInputFields(input: $bodyInput, footer: "Optional. Saved as today’s measurement; log more from Home → Health to track growth.")
+
                 Section("Season") {
                     TextField("Season", text: $season)
                     Stepper(value: $weeklyGoal, in: 1...30, step: 0.5) {
@@ -54,7 +57,7 @@ struct NewProfileView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create", action: create).fontWeight(.bold).disabled(trimmedName.isEmpty)
+                    Button("Create", action: create).fontWeight(.bold).disabled(trimmedName.isEmpty || bodyInput.hasError)
                 }
             }
         }
@@ -65,8 +68,12 @@ struct NewProfileView: View {
         let profile = AthleteProfile(firstName: trimmedName, classYear: classYear,
                                      positions: positions.trimmingCharacters(in: .whitespacesAndNewlines),
                                      benchmarkGroup: group, weeklyGoalHours: weeklyGoal,
-                                     season: season.trimmingCharacters(in: .whitespacesAndNewlines))
-        store.createProfile(AppData.newProfile(profile, themeID: themeID))
+                                     season: season.trimmingCharacters(in: .whitespacesAndNewlines), bodyUnits: bodyInput.units)
+        var data = AppData.newProfile(profile, themeID: themeID)
+        if !bodyInput.isBlank && !bodyInput.hasError {
+            data.bodyMeasurements = [bodyInput.applied(to: BodyMeasurement(date: Date()))]
+        }
+        store.createProfile(data)
         dismiss()
     }
 }

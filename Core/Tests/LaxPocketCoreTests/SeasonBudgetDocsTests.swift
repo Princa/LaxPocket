@@ -119,6 +119,8 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(data.seasonBudget, 500)
         XCTAssertEqual(data.themeID, "navy")
         XCTAssertEqual(data.combineResults.first?.value(for: .gripLeft), 262)
+        XCTAssertTrue(data.bodyMeasurements.isEmpty)
+        XCTAssertEqual(data.profile.bodyUnits, .imperial)
     }
 
     func testBlankSeasonKeepsProfileAndPrograms() {
@@ -133,6 +135,7 @@ final class AppDataTests: XCTestCase {
         XCTAssertTrue(blank.expenses.isEmpty)
         XCTAssertTrue(blank.docs.isEmpty)
         XCTAssertTrue(blank.combineResults.isEmpty)
+        XCTAssertEqual(blank.bodyMeasurements, season.bodyMeasurements, "height and weight history belongs to the athlete, not the season")
     }
 
     func testNewProfileStartsEmpty() {

@@ -6,11 +6,13 @@ LaxPocket is local-first: every athlete's data lives in a JSON file on the phone
 
 1. **Create the project.** In the [Supabase dashboard](https://supabase.com/dashboard), choose **New project**, name it `LaxPocket`, and pick a region near you (for Ontario, *Canada (Central)*). Save the database password somewhere safe.
 2. **Create the tables.** Either:
-   - open **SQL Editor**, paste the contents of [`supabase/migrations/20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) and run it, or
+   - open **SQL Editor** and run each file in [`supabase/migrations`](../supabase/migrations) in order (the file names start with the date), or
    - with the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase link --project-ref <your-project-ref>` then `supabase db push`.
 3. **Check sign-in settings.** Under **Authentication → Sign In / Providers**, keep **Email** on. With *Confirm email* on (the default), a new account has to click the link in its email before it can sign in.
 4. **Connect the app.** `LaxPocket/Resources/Supabase.plist` holds the **Project URL** and the **anon** (or *publishable*) key; this repository's copy already points at the LaxPocket project. For a different project, replace both values (they're under the project's **Connect** button, or in **Project Settings → API Keys**); [`supabase/Supabase.example.plist`](../supabase/Supabase.example.plist) is a blank template. Then run `xcodegen generate` and build.
 5. **Sign in on the phone.** In the app: **Theme & settings → Cloud sync → Create an account**, confirm the email, then **Sign in**. Every athlete on the phone uploads. On a second phone, sign in with the same account and the athletes come down.
+
+**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql).
 
 The anon key is designed to ship inside apps. It only lets a client talk to the API; row-level security decides what each signed-in account can read or write. Never put the `service_role` key in the app.
 
@@ -18,7 +20,7 @@ Once your own accounts exist, you can turn off **Allow new users to sign up** in
 
 ## Schema
 
-The migration is [`supabase/migrations/20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql). Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
+The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, and [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
 
 ```mermaid
 erDiagram
@@ -37,11 +39,12 @@ erDiagram
     season_events ||--o{ event_checklist_items : ""
     profiles ||--o{ expenses : ""
     profiles ||--o{ mental_docs : ""
+    profiles ||--o{ body_measurements : ""
 ```
 
 | Table | One row per | Key columns |
 |---|---|---|
-| `profiles` | athlete | `id` (same UUID as on the phone), name, class year, positions, NDTP group, weekly goal, season label, budget, theme |
+| `profiles` | athlete | `id` (same UUID as on the phone), name, class year, positions, NDTP group, weekly goal, season label, budget, theme, `body_units` (`imperial` / `metric`) |
 | `profile_members` | account with access to an athlete | `profile_id`, `user_id`, `role`: `owner` / `editor` / `viewer` |
 | `programs` | team, coach, facility… | primary key (`profile_id`, `id`); group; which session type it counts toward |
 | `training_sessions` | logged session | `started_at`, `category`, `minutes`, `effort` (RPE 1–10), `focus` (text array), `notes`; foreign key to its program |
@@ -54,6 +57,7 @@ erDiagram
 | `event_videos` | video link | `position`, `title`, `url`, `duration_text` |
 | `event_checklist_items` | prep checklist item | `position`, `title`, `done` |
 | `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note` |
+| `body_measurements` | height and weight check | `measured_at`, `height_cm` (0.1 cm, 50–250), `weight_kg` (0.01 kg, 10–250), `note`. Either value can be null, not both. Always metric; `profiles.body_units` only sets how the app shows them |
 | `mental_docs` | linked Drive document | `url`, `folder`, `kind`, `status`, when and by whom the document was last updated. The file itself stays in Google Drive |
 
 Design choices:
@@ -62,7 +66,7 @@ Design choices:
 - **IDs come from the phone.** Rows are created offline, so the app assigns UUIDs (program IDs are short strings, unique per athlete) and the database accepts them. Upserts are safe to repeat.
 - **Children carry `profile_id` too**, with a composite foreign key to their parent (`(event_id, profile_id)` → `season_events (id, profile_id)`). Access rules are the same simple check on every table, and a row can't be attached to someone else's event while claiming to be yours.
 - **Enum-like columns are `text` with a `check`** listing the app's values (`'u15Women'`, `'teamFees'`, `'toReview'`…). They match the Swift enums' raw values, so no mapping is needed, and adding a value is a one-line migration.
-- **Checks keep the data sensible:** effort 1–10, minutes 1–1440, both scores or neither, events can't end before they start, doc and video links must be `http(s)`.
+- **Checks keep the data sensible:** effort 1–10, minutes 1–1440, both scores or neither, events can't end before they start, doc and video links must be `http(s)`, heights and weights in centimetre and kilogram ranges.
 - Every table has `created_at` and `updated_at` (kept current by a trigger). `profiles.created_by` records who made the athlete and never changes.
 
 ### Who can see what
@@ -96,7 +100,7 @@ An event syncs as one unit together with its stats, reflection, goals, videos an
 
 The app syncs a few seconds after each change, when it comes to the foreground, and from **Sync now**. Deleting an athlete on a phone only removes it from that phone. The cloud copy is listed under *In the cloud, not on this iPhone*, where it can be downloaded again or deleted for everyone.
 
-Timestamps are compared to the millisecond, the precision that survives a round trip through Postgres. Money is rounded to cents and hours to one decimal before upload, so a value read back from the database equals the one that was sent.
+Timestamps are compared to the millisecond, the precision that survives a round trip through Postgres. Money is rounded to cents, hours and heights to one decimal and weights to two before upload, so a value read back from the database equals the one that was sent.
 
 ## Testing
 

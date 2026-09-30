@@ -52,6 +52,9 @@ values ('50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-0000000
 insert into public.mental_docs (id, profile_id, title, url, folder, kind, status, doc_updated_at)
 values ('60000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Pre-game routine',
         'https://docs.google.com/document/d/abc', 'routines', 'word', 'toReview', '2026-09-22T12:00:00Z');
+insert into public.body_measurements (id, profile_id, measured_at, height_cm, weight_kg) values
+  ('70000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '2026-06-01T12:00:00Z', 160.0, 48.5),
+  ('70000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', '2026-09-28T12:00:00Z', null, 49.9);
 
 -- The same upsert PostgREST runs for "resolution=merge-duplicates".
 insert into public.profiles (id, first_name) values ('10000000-0000-4000-8000-000000000001', 'Sam K')
@@ -70,6 +73,8 @@ begin
   assert (select count(*) from public.event_focus_goals) = 1, 'A sees focus goals';
   assert (select count(*) from public.expenses) = 1, 'A sees expenses';
   assert (select count(*) from public.mental_docs) = 1, 'A sees docs';
+  assert (select count(*) from public.body_measurements) = 2, 'A sees height and weight';
+  assert (select body_units from public.profiles) = 'imperial', 'profiles default to imperial units';
 end
 $$;
 
@@ -140,6 +145,37 @@ begin
   exception when check_violation then failed := true;
   end;
   assert failed, 'doc links must be http(s)';
+
+  failed := false;
+  begin
+    insert into public.body_measurements (profile_id, measured_at)
+    values ('10000000-0000-4000-8000-000000000001', now());
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a measurement needs a height or a weight';
+
+  failed := false;
+  begin
+    insert into public.body_measurements (profile_id, measured_at, height_cm)
+    values ('10000000-0000-4000-8000-000000000001', now(), 5.4);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'heights are in centimetres';
+
+  failed := false;
+  begin
+    insert into public.body_measurements (profile_id, measured_at, weight_kg)
+    values ('10000000-0000-4000-8000-000000000001', now(), 400);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'weights are in kilograms';
+
+  failed := false;
+  begin
+    update public.profiles set body_units = 'stone' where id = '10000000-0000-4000-8000-000000000001';
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'units are imperial or metric';
 end
 $$;
 
@@ -160,10 +196,20 @@ begin
   assert (select count(*) from public.training_sessions) = 0, 'B sees none of A''s sessions';
   assert (select count(*) from public.season_events) = 0, 'B sees none of A''s events';
   assert (select count(*) from public.game_reflections) = 0, 'B sees none of A''s reflections';
+  assert (select count(*) from public.body_measurements) = 0, 'B sees none of A''s height and weight';
   assert (select count(*) from public.profile_members) = 1, 'B sees only their own membership';
 
   update public.profiles set first_name = 'Hacked' where id = '10000000-0000-4000-8000-000000000001';
   delete from public.expenses where profile_id = '10000000-0000-4000-8000-000000000001';
+  update public.body_measurements set weight_kg = 99 where profile_id = '10000000-0000-4000-8000-000000000001';
+
+  failed := false;
+  begin
+    insert into public.body_measurements (profile_id, measured_at, weight_kg)
+    values ('10000000-0000-4000-8000-000000000001', now(), 50);
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'B can''t log height and weight for A''s profile';
 
   failed := false;
   begin
@@ -212,6 +258,7 @@ do $$
 begin
   assert (select first_name from public.profiles where id = '10000000-0000-4000-8000-000000000001') = 'Sam K', 'B''s update did nothing';
   assert (select count(*) from public.expenses) = 1, 'B''s delete did nothing';
+  assert (select weight_kg from public.body_measurements where id = '70000000-0000-4000-8000-000000000001') = 48.5, 'B''s weight change did nothing';
 end
 $$;
 
@@ -244,6 +291,7 @@ begin
   assert (select count(*) from public.profiles) = 2, 'viewer B sees A''s profile and their own';
   assert (select count(*) from public.programs where profile_id = '10000000-0000-4000-8000-000000000001') = 2, 'viewer reads programs';
   assert (select count(*) from public.game_stats) = 1, 'viewer reads stats';
+  assert (select count(*) from public.body_measurements) = 2, 'viewer reads height and weight';
   begin
     insert into public.expenses (profile_id, spent_at, category, amount)
     values ('10000000-0000-4000-8000-000000000001', now(), 'travel', 10);
@@ -294,6 +342,7 @@ do $$
 begin
   assert (select count(*) from public.profiles) = 0, 'C sees no profiles';
   assert (select count(*) from public.expenses) = 0, 'C sees no expenses';
+  assert (select count(*) from public.body_measurements) = 0, 'C sees no height and weight';
   assert (select count(*) from public.profile_members) = 0, 'C sees no memberships';
 end
 $$;
@@ -338,7 +387,8 @@ declare
 begin
   foreach t in array array[
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
-    'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs', 'profile_members'
+    'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
+    'body_measurements', 'profile_members'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);

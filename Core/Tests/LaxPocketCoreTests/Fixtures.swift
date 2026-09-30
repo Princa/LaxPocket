@@ -44,9 +44,14 @@ enum Fixtures {
             MentalDoc(title: "Pre-game routine", url: URL(string: "https://docs.google.com/document/d/abc/edit?rtpof=true")!, folder: .routines,
                       status: .toReview, updatedAt: day(1), updatedBy: "Coach", note: "3 comments")
         ]
+        let body = [
+            BodyMeasurement(date: day(-120, hour: 8), heightCm: 157.5, weightKg: 46.2),
+            BodyMeasurement(date: day(-30, hour: 8), heightCm: 159.8, weightKg: 47.85, note: "Check-up"),
+            BodyMeasurement(date: day(0, hour: 8), weightKg: 48.1)
+        ]
         let profile = AthleteProfile(firstName: name, classYear: 2031, positions: "Midfield", benchmarkGroup: .u15Women,
-                                     mentalCoachName: "Coach K", weeklyGoalHours: 12.5, season: "2026/27")
+                                     mentalCoachName: "Coach K", weeklyGoalHours: 12.5, season: "2026/27", bodyUnits: .metric)
         return AppData(profile: profile, programs: programs, sessions: sessions, combineResults: [combine], events: events,
-                       expenses: expenses, seasonBudget: 14_000, docs: docs, themeID: "northwestern")
+                       expenses: expenses, seasonBudget: 14_000, docs: docs, bodyMeasurements: body, themeID: "northwestern")
     }
 }
