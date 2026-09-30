@@ -7,6 +7,7 @@ struct HomeView: View {
     @State private var showLogSession = false
     @State private var showSettings = false
     @State private var showNewProfile = false
+    @State private var showProfile = false
 
     var body: some View {
         let data = store.data
@@ -91,6 +92,7 @@ struct HomeView: View {
         .sheet(isPresented: $showLogSession) { LogSessionView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showNewProfile) { NewProfileView() }
+        .navigationDestination(isPresented: $showProfile) { AthleteProfileView() }
     }
 
     // MARK: - Pieces
@@ -125,6 +127,16 @@ struct HomeView: View {
             Text(profileLine)
                 .font(.system(size: 14))
                 .foregroundStyle(theme.onPrimary)
+            NavigationLink { AthleteProfileView() } label: {
+                Label("Edit profile", systemImage: "pencil")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 36)
+                    .background(Color.white.opacity(0.14), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
@@ -148,6 +160,7 @@ struct HomeView: View {
                     }
                 }
             }
+            Button { showProfile = true } label: { Label("Edit \(store.data.summary.displayName)’s profile", systemImage: "pencil") }
             Button { showNewProfile = true } label: { Label("Add athlete", systemImage: "person.badge.plus") }
         } label: {
             headerIcon(store.profiles.count > 1 ? "person.2" : "person")
