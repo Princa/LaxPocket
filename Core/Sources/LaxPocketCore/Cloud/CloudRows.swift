@@ -18,7 +18,7 @@ public protocol CloudRow: Codable, Hashable, Sendable {
 public struct ProfileRow: CloudRow {
     public static let table = "profiles"
     public static let columns = ["id", "first_name", "class_year", "positions", "benchmark_group", "mental_coach_name",
-                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id"]
+                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -31,12 +31,31 @@ public struct ProfileRow: CloudRow {
     public var seasonLabel: String
     public var seasonBudget: Double
     public var themeID: String
+    public var bodyUnits: BodyUnits
 
     enum CodingKeys: String, CodingKey {
         case id, positions
         case firstName = "first_name", classYear = "class_year", benchmarkGroup = "benchmark_group"
         case mentalCoachName = "mental_coach_name", weeklyGoalHours = "weekly_goal_hours", seasonLabel = "season_label"
-        case seasonBudget = "season_budget", themeID = "theme_id"
+        case seasonBudget = "season_budget", themeID = "theme_id", bodyUnits = "body_units"
+    }
+}
+
+extension ProfileRow {
+    /// Sync records saved before height and weight tracking have no `body_units`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        firstName = try c.decode(String.self, forKey: .firstName)
+        classYear = try c.decodeIfPresent(Int.self, forKey: .classYear)
+        positions = try c.decode(String.self, forKey: .positions)
+        benchmarkGroup = try c.decode(BenchmarkGroup.self, forKey: .benchmarkGroup)
+        mentalCoachName = try c.decode(String.self, forKey: .mentalCoachName)
+        weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
+        seasonLabel = try c.decode(String.self, forKey: .seasonLabel)
+        seasonBudget = try c.decode(Double.self, forKey: .seasonBudget)
+        themeID = try c.decode(String.self, forKey: .themeID)
+        bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
     }
 }
 
@@ -278,6 +297,24 @@ public struct MentalDocRow: CloudRow {
     }
 }
 
+public struct BodyMeasurementRow: CloudRow {
+    public static let table = "body_measurements"
+    public static let columns = ["id", "profile_id", "measured_at", "height_cm", "weight_kg", "note"]
+    public static let conflictColumns = ["id"]
+
+    public var id: UUID
+    public var profileID: UUID
+    public var measuredAt: Timestamp
+    public var heightCm: Double?
+    public var weightKg: Double?
+    public var note: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, note
+        case profileID = "profile_id", measuredAt = "measured_at", heightCm = "height_cm", weightKg = "weight_kg"
+    }
+}
+
 // MARK: - Groups that sync as one unit
 
 /// A testing day with its results. Changing any result re-sends the whole day.
@@ -311,9 +348,10 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var events: [EventBundle]
     public var expenses: [ExpenseRow]
     public var docs: [MentalDocRow]
+    public var bodyMeasurements: [BodyMeasurementRow]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
-                events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = []) {
+                events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -321,6 +359,24 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.events = events
         self.expenses = expenses
         self.docs = docs
+        self.bodyMeasurements = bodyMeasurements
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements
+    }
+
+    /// Sync records saved before height and weight tracking have no `bodyMeasurements`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        profile = try c.decode(ProfileRow.self, forKey: .profile)
+        programs = try c.decode([ProgramRow].self, forKey: .programs)
+        sessions = try c.decode([SessionRow].self, forKey: .sessions)
+        combineResults = try c.decode([CombineBundle].self, forKey: .combineResults)
+        events = try c.decode([EventBundle].self, forKey: .events)
+        expenses = try c.decode([ExpenseRow].self, forKey: .expenses)
+        docs = try c.decode([MentalDocRow].self, forKey: .docs)
+        bodyMeasurements = try c.decodeIfPresent([BodyMeasurementRow].self, forKey: .bodyMeasurements) ?? []
     }
 }
 
@@ -345,6 +401,20 @@ extension ProfileRow {
         seasonLabel = p.season
         seasonBudget = roundedTo(2, data.seasonBudget)
         themeID = data.themeID
+        bodyUnits = p.bodyUnits
+    }
+}
+
+extension BodyMeasurementRow {
+    /// Rounded to what the database stores. A value outside the accepted range is left out, and a measurement
+    /// with neither value has no row, rather than failing the sync.
+    init?(_ m: BodyMeasurement, profileID: UUID) {
+        var height: Double? = m.heightCm.map(BodyMeasurement.roundedHeight)
+        if let value = height, !BodyMeasurement.heightRangeCm.contains(value) { height = nil }
+        var weight: Double? = m.weightKg.map(BodyMeasurement.roundedWeight)
+        if let value = weight, !BodyMeasurement.weightRangeKg.contains(value) { weight = nil }
+        guard height != nil || weight != nil else { return nil }
+        self.init(id: m.id, profileID: profileID, measuredAt: Timestamp(m.date), heightCm: height, weightKg: weight, note: m.note)
     }
 }
 
@@ -405,6 +475,7 @@ extension ProfileSnapshot {
             MentalDocRow(id: d.id, profileID: pid, title: d.title, url: d.url.absoluteString, folder: d.folder, kind: d.kind,
                          status: d.status, docUpdatedAt: Timestamp(d.updatedAt), docUpdatedBy: d.updatedBy, note: d.note)
         }
+        bodyMeasurements = data.bodyMeasurements.compactMap { BodyMeasurementRow($0, profileID: pid) }
     }
 
     // MARK: - Rows → app data
@@ -413,7 +484,8 @@ extension ProfileSnapshot {
     public var appData: AppData {
         let p = profile
         let athlete = AthleteProfile(firstName: p.firstName, classYear: p.classYear, positions: p.positions, benchmarkGroup: p.benchmarkGroup,
-                                     mentalCoachName: p.mentalCoachName, weeklyGoalHours: p.weeklyGoalHours, season: p.seasonLabel)
+                                     mentalCoachName: p.mentalCoachName, weeklyGoalHours: p.weeklyGoalHours, season: p.seasonLabel,
+                                     bodyUnits: p.bodyUnits)
         return AppData(
             id: p.id,
             profile: athlete,
@@ -439,6 +511,9 @@ extension ProfileSnapshot {
                     MentalDoc(id: r.id, title: r.title, url: $0, folder: r.folder, kind: r.kind, status: r.status,
                               updatedAt: r.docUpdatedAt.date, updatedBy: r.docUpdatedBy, note: r.note)
                 }
+            },
+            bodyMeasurements: bodyMeasurements.sorted { $0.measuredAt < $1.measuredAt }.map { r in
+                BodyMeasurement(id: r.id, date: r.measuredAt.date, heightCm: r.heightCm, weightKg: r.weightKg, note: r.note)
             },
             themeID: p.themeID
         )
@@ -476,5 +551,6 @@ extension ProfileSnapshot {
             && Set(programs) == Set(other.programs) && Set(sessions) == Set(other.sessions)
             && Set(combineResults) == Set(other.combineResults) && Set(events) == Set(other.events)
             && Set(expenses) == Set(other.expenses) && Set(docs) == Set(other.docs)
+            && Set(bodyMeasurements) == Set(other.bodyMeasurements)
     }
 }

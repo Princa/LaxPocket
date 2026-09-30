@@ -202,6 +202,21 @@ final class AppStore {
         update { $0.docs.removeAll { ids.contains($0.id) } }
     }
 
+    /// Adds the height and weight check, or replaces the one with the same ID.
+    func saveBodyMeasurement(_ measurement: BodyMeasurement) {
+        update { data in
+            if let index = data.bodyMeasurements.firstIndex(where: { $0.id == measurement.id }) {
+                data.bodyMeasurements[index] = measurement
+            } else {
+                data.bodyMeasurements.append(measurement)
+            }
+        }
+    }
+
+    func deleteBodyMeasurements(_ ids: Set<UUID>) {
+        update { $0.bodyMeasurements.removeAll { ids.contains($0.id) } }
+    }
+
     func setTheme(_ palette: ThemePalette) {
         update { $0.themeID = palette.id }
         applyAppIcon(for: palette)

@@ -41,10 +41,11 @@ public struct CloudSync: Sendable {
         let checklist = try await client.select(ChecklistItemRow.table, filters: byProfile, order: "event_id,position,id", as: ChecklistItemRow.self)
         let expenses = try await client.select(ExpenseRow.table, filters: byProfile, order: "id", as: ExpenseRow.self)
         let docs = try await client.select(MentalDocRow.table, filters: byProfile, order: "id", as: MentalDocRow.self)
+        let body = try await client.select(BodyMeasurementRow.table, filters: byProfile, order: "id", as: BodyMeasurementRow.self)
 
         return ProfileSnapshot.assemble(profile: profile, programs: programs, sessions: sessions, results: results, measurements: measurements,
                                         events: events, stats: stats, reflections: reflections, focus: focus, videos: videos,
-                                        checklist: checklist, expenses: expenses, docs: docs)
+                                        checklist: checklist, expenses: expenses, docs: docs, bodyMeasurements: body)
     }
 
     /// Writes changes for one profile. Parents go before children and deletes go last, so foreign keys hold at every step.
@@ -78,6 +79,7 @@ public struct CloudSync: Sendable {
 
         try await client.upsert(changes.expenses.upserts)
         try await client.upsert(changes.docs.upserts)
+        try await client.upsert(changes.bodyMeasurements.upserts)
 
         func ids(_ keys: [UUID]) -> [String] { keys.map { $0.uuidString.lowercased() } }
         try await client.delete(SessionRow.table, where: "id", in: ids(changes.sessions.deletes), filters: byProfile)
@@ -85,6 +87,7 @@ public struct CloudSync: Sendable {
         try await client.delete(EventRow.table, where: "id", in: ids(changes.events.deletes), filters: byProfile)
         try await client.delete(ExpenseRow.table, where: "id", in: ids(changes.expenses.deletes), filters: byProfile)
         try await client.delete(MentalDocRow.table, where: "id", in: ids(changes.docs.deletes), filters: byProfile)
+        try await client.delete(BodyMeasurementRow.table, where: "id", in: ids(changes.bodyMeasurements.deletes), filters: byProfile)
         // Programs last: sessions that pointed at them are gone by now.
         try await client.delete(ProgramRow.table, where: "id", in: changes.programs.deletes, filters: byProfile)
     }
@@ -126,7 +129,7 @@ extension ProfileSnapshot {
     static func assemble(profile: ProfileRow, programs: [ProgramRow], sessions: [SessionRow], results: [CombineResultRow],
                          measurements: [CombineMeasurementRow], events: [EventRow], stats: [GameStatsRow], reflections: [ReflectionRow],
                          focus: [FocusGoalRow], videos: [VideoRow], checklist: [ChecklistItemRow], expenses: [ExpenseRow],
-                         docs: [MentalDocRow]) -> ProfileSnapshot {
+                         docs: [MentalDocRow], bodyMeasurements: [BodyMeasurementRow]) -> ProfileSnapshot {
         let metricOrder = Dictionary(uniqueKeysWithValues: CombineMetric.allCases.enumerated().map { ($1, $0) })
         let measurementsByResult = Dictionary(grouping: measurements, by: \.resultID)
         let statsByEvent = Dictionary(stats.map { ($0.eventID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -149,7 +152,8 @@ extension ProfileSnapshot {
                             checklist: (checklistByEvent[e.id] ?? []).sorted { $0.position < $1.position })
             },
             expenses: expenses,
-            docs: docs
+            docs: docs,
+            bodyMeasurements: bodyMeasurements
         )
     }
 }

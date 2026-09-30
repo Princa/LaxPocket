@@ -46,6 +46,7 @@ final class CloudSyncIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(a.events), Set(b.events), "events", file: file, line: line)
         XCTAssertEqual(Set(a.expenses), Set(b.expenses), "expenses", file: file, line: line)
         XCTAssertEqual(Set(a.docs), Set(b.docs), "docs", file: file, line: line)
+        XCTAssertEqual(Set(a.bodyMeasurements), Set(b.bodyMeasurements), "height and weight", file: file, line: line)
     }
 
     func testTwoDevicesSyncOneAthlete() async throws {
@@ -78,11 +79,15 @@ final class CloudSyncIntegrationTests: XCTestCase {
         phoneData.events[0].videos = []
         phoneData.combineResults[0].measurements.removeAll { $0.metric == .gripLeft }
         phoneData.events.append(SeasonEvent(kind: .tournament, title: "Winter tournament", team: "Club 2031", date: Fixtures.day(90), endDate: Fixtures.day(91)))
+        phoneData.bodyMeasurements[1].heightCm = 160.1
+        phoneData.bodyMeasurements.removeAll { $0.id == season.bodyMeasurements[2].id }
 
         tabletData.sessions[2].notes = "From the tablet"
         tabletData.docs.append(MentalDoc(title: "Season goals", url: URL(string: "https://docs.google.com/document/d/xyz")!, folder: .goals,
                                          updatedAt: Fixtures.day(2), updatedBy: "Sam"))
         tabletData.profile.weeklyGoalHours = 14
+        tabletData.profile.bodyUnits = .imperial
+        tabletData.bodyMeasurements.append(BodyMeasurement(date: Fixtures.day(5, hour: 8), heightCm: 160.3, weightKg: 48.53))
 
         phoneBase = try await phone.sync(local: phoneData, base: phoneBase)
         tabletBase = try await tablet.sync(local: tabletData, base: tabletBase)
@@ -100,6 +105,9 @@ final class CloudSyncIntegrationTests: XCTestCase {
         XCTAssertFalse(final.programs.contains { $0.id == "combine" })
         XCTAssertEqual(final.docs.count, 2)
         XCTAssertEqual(final.profile.weeklyGoalHours, 14)
+        XCTAssertEqual(final.profile.bodyUnits, .imperial)
+        XCTAssertEqual(final.bodyMeasurements.map(\.heightCm), [157.5, 160.1, 160.3])
+        XCTAssertEqual(final.bodyMeasurements.last?.weightKg, 48.53)
         XCTAssertTrue(final.events.contains { $0.title == "Winter tournament" })
         let game = try XCTUnwrap(final.events.first { $0.id == season.events[0].id })
         XCTAssertNil(game.stats)

@@ -9,8 +9,11 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var weeklyGoalHours: Double
     /// Season label, e.g. "2026/27".
     public var season: String
+    /// How height and weight are shown and typed in.
+    public var bodyUnits: BodyUnits
 
-    public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String) {
+    public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
+                bodyUnits: BodyUnits = .imperial) {
         self.firstName = firstName
         self.classYear = classYear
         self.positions = positions
@@ -18,6 +21,24 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         self.mentalCoachName = mentalCoachName
         self.weeklyGoalHours = weeklyGoalHours
         self.season = season
+        self.bodyUnits = bodyUnits
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case firstName, classYear, positions, benchmarkGroup, mentalCoachName, weeklyGoalHours, season, bodyUnits
+    }
+
+    /// Profiles saved before height and weight tracking have no `bodyUnits`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        firstName = try c.decode(String.self, forKey: .firstName)
+        classYear = try c.decodeIfPresent(Int.self, forKey: .classYear)
+        positions = try c.decode(String.self, forKey: .positions)
+        benchmarkGroup = try c.decode(BenchmarkGroup.self, forKey: .benchmarkGroup)
+        mentalCoachName = try c.decode(String.self, forKey: .mentalCoachName)
+        weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
+        season = try c.decode(String.self, forKey: .season)
+        bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
     }
 
     /// "Olivia's Season" style title.
@@ -51,9 +72,11 @@ public struct AppData: Codable, Equatable, Sendable {
     public var expenses: [Expense]
     public var seasonBudget: Double
     public var docs: [MentalDoc]
+    /// Height and weight checks. They belong to the athlete, so a blank season keeps them.
+    public var bodyMeasurements: [BodyMeasurement]
     public var themeID: String
 
-    public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], themeID: String = ThemeCatalog.defaultID) {
+    public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [], themeID: String = ThemeCatalog.defaultID) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -64,11 +87,12 @@ public struct AppData: Codable, Equatable, Sendable {
         self.expenses = expenses
         self.seasonBudget = seasonBudget
         self.docs = docs
+        self.bodyMeasurements = bodyMeasurements
         self.themeID = themeID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, themeID
+        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, bodyMeasurements, themeID
     }
 
     /// Reads current files and version 1 season files, which had no `id`.
@@ -84,6 +108,7 @@ public struct AppData: Codable, Equatable, Sendable {
         expenses = try c.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
         seasonBudget = try c.decodeIfPresent(Double.self, forKey: .seasonBudget) ?? 0
         docs = try c.decodeIfPresent([MentalDoc].self, forKey: .docs) ?? []
+        bodyMeasurements = try c.decodeIfPresent([BodyMeasurement].self, forKey: .bodyMeasurements) ?? []
         themeID = try c.decodeIfPresent(String.self, forKey: .themeID) ?? ThemeCatalog.defaultID
     }
 
@@ -126,9 +151,10 @@ public struct AppData: Codable, Equatable, Sendable {
         return counts
     }
 
-    /// A clean season for the same athlete: keeps the profile, programs, budget and theme, drops logged data.
+    /// A clean season for the same athlete: keeps the profile, programs, budget, height and weight history and theme,
+    /// drops the season's logged data.
     public func blankSeason() -> AppData {
-        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, themeID: themeID)
+        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, bodyMeasurements: bodyMeasurements, themeID: themeID)
     }
 
     public static let encoder: JSONEncoder = {

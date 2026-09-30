@@ -20,7 +20,7 @@ struct ProfilesView: View {
                         .accessibilityAddTraits(summary.id == store.data.id ? .isSelected : [])
                 }
             } footer: {
-                Text("Each athlete has their own sessions, results, events, budget and documents. Tap to switch; swipe to delete.")
+                Text("Each athlete has their own sessions, results, events, budget, documents and height and weight log. Tap to switch; swipe to delete.")
             }
 
             Section {
@@ -35,7 +35,7 @@ struct ProfilesView: View {
         } message: { summary in
             Text(cloud.isSignedIn
                  ? "Removes \(summary.displayName) from this iPhone. The copy in your cloud account stays; delete it from Cloud sync if you want it gone everywhere."
-                 : "Removes \(summary.displayName)’s profile, sessions, results, events, expenses and linked docs from this iPhone. This can’t be undone.")
+                 : "Removes \(summary.displayName)’s profile, sessions, results, events, expenses, linked docs and height and weight log from this iPhone. This can’t be undone.")
         }
     }
 
