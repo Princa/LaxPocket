@@ -30,10 +30,13 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    NavigationLink { AthleteProfileView() } label: {
+                        Label("Edit \(store.data.summary.displayName)’s profile", systemImage: "person.text.rectangle")
+                    }
                 } header: {
                     Text("Athletes")
                 } footer: {
-                    Text("Switch, add or remove athletes. The settings below are for \(store.data.summary.displayName).")
+                    Text("Switch, add or remove athletes, or edit \(store.data.summary.displayName)’s details, clubs and teams. The settings below are for \(store.data.summary.displayName).")
                 }
 
                 Section {
@@ -53,25 +56,6 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(palette.id == store.palette.id ? .isSelected : [])
-                    }
-                }
-
-                Section("Athlete profile") {
-                    TextField("First name", text: binding(\.profile.firstName))
-                        .textContentType(.givenName)
-                    TextField("Class of", value: binding(\.profile.classYear), format: .number.grouping(.never))
-                        .keyboardType(.numberPad)
-                    TextField("Positions", text: binding(\.profile.positions))
-                    Picker("NDTP standards", selection: binding(\.profile.benchmarkGroup)) {
-                        ForEach(BenchmarkGroup.allCases) { Text($0.title).tag($0) }
-                    }
-                    TextField("Mental coach's name", text: binding(\.profile.mentalCoachName))
-                    NavigationLink { HealthView() } label: {
-                        LabeledContent("Height & weight",
-                                       value: BodyTrends.summary(store.data.bodyMeasurements, units: store.profile.bodyUnits) ?? "Not logged")
-                    }
-                    Picker("Units", selection: binding(\.profile.bodyUnits)) {
-                        ForEach(BodyUnits.allCases) { Text($0.title).tag($0) }
                     }
                 }
 

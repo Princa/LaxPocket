@@ -27,6 +27,11 @@ struct ProgramEditorView: View {
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var sessionCount: Int { store.data.sessionCountByProgram[id] ?? 0 }
 
+    private var title: String {
+        let noun = group == .teams ? "team" : "program"
+        return isNew ? "Add \(noun)" : "Edit \(noun)"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -63,7 +68,7 @@ struct ProgramEditorView: View {
 
                 if !isNew {
                     Section {
-                        Button("Delete program", role: .destructive) { confirmDelete = true }
+                        Button(group == .teams ? "Delete team" : "Delete program", role: .destructive) { confirmDelete = true }
                             .disabled(sessionCount > 0)
                     } footer: {
                         if sessionCount > 0 {
@@ -72,7 +77,7 @@ struct ProgramEditorView: View {
                     }
                 }
             }
-            .navigationTitle(isNew ? "Add program" : "Edit program")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

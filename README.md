@@ -11,13 +11,14 @@ Built with SwiftUI for iOS 17+.
 | Tab / screen | What it does |
 |---|---|
 | **Athletes** | One profile per athlete, each with its own sessions, results, events, budget, docs, height and weight log and theme. Switch from the Home header or **Theme & settings → Athletes**. |
+| **Athlete profile** | **Home → Edit profile** (also in the athlete menu and Theme & settings). Name, class year, positions, NDTP group and mental coach; every club and team the athlete plays for (club, school, box, provincial), with games and hours for each; and height and weight. |
 | **Home** | This week's hours split into Team / Skills / Fitness against a weekly goal, a load ratio, season totals, what's up next, and showcase prep. |
 | **Training** | Weekly and season hours by category (Swift Charts), an acute : chronic workload gauge, and a session log. **Log session** captures program, duration, effort (RPE 1–10), focus tags and notes. |
 | **Metrics** | Combine results scored against the **NDTP 2026 Fitness Standards** (Developing / Competitive / Elite) with the gap to the next tier, a comparison against the next age group, and a left-vs-right balance check. |
 | **Events** | Season record and totals, upcoming games and showcases, past events waiting for a score, and results. **Add / edit event** covers the score, stat line, video links, pre-game goals (hit / partly / missed), the post-game reflection with coach feedback, and a prep checklist. |
 | **Budget** | Spend against the season budget, by category, plus recent expenses. |
 | **Programs** | Teams, coaches and facilities, with hours logged at each. Add, edit or remove them here. |
-| **Health** | Height and weight over time, from **Home → Health** or **Theme & settings → Height & weight**. Latest height and weight, the growth rate (flagged at growth-spurt pace, about 0.6 cm a month), height and weight charts over 3 months to all time, and a log with the change since the last height. Shown in ft/in and lb or cm and kg, per athlete. |
+| **Health** | Height and weight over time, from **Home → Health** or the athlete profile. Latest height and weight, the growth rate (flagged at growth-spurt pace, about 0.6 cm a month), height and weight charts over 3 months to all time, and a log with the change since the last height. Shown in ft/in and lb or cm and kg, per athlete. |
 | **Mental game** | Google Drive documents shared with the mental performance coach, a "to review" queue, folders, and link-a-doc. Docs open in Google Docs or Word for editing. |
 | **Cloud sync** | Optional. Sign in to back up every athlete to Supabase and keep phones in sync; share an athlete with a parent's or coach's account. See [docs/supabase.md](docs/supabase.md). |
 | **Theme & settings** | 11 colour themes (the original plus the final 2026 D1 women's top 10), each with a matching alternate app icon. Also the athletes list, the active athlete's profile, weekly goal, budget, and a blank-season reset. |
