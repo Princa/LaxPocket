@@ -149,6 +149,7 @@ struct StackedHoursBar: View {
             (hours.team, theme.color(for: .team)),
             (hours.skills, theme.color(for: .skills)),
             (hours.fitness, theme.color(for: .fitness)),
+            (hours.mental, theme.color(for: .mental)),
             (remainder, AppTheme.line)
         ].filter { $0.0 > 0 }
         let total = segments.reduce(0) { $0 + $1.0 }

@@ -6,7 +6,7 @@ struct LogSessionView: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.dismiss) private var dismiss
 
-    @State private var category: SessionCategory = .skills
+    @State private var category: SessionCategory
     @State private var programID: String?
     @State private var date = Date()
     @State private var minutes = 60
@@ -15,8 +15,12 @@ struct LogSessionView: View {
     @State private var notes = ""
     @State private var showAddProgram = false
 
+    init(category: SessionCategory = .skills) {
+        _category = State(initialValue: category)
+    }
+
     private var programs: [Program] {
-        store.data.programs.filter { $0.sessionCategory == category }
+        store.data.programs.filter { $0.loggedCategory == category }
     }
 
     var body: some View {
@@ -88,7 +92,7 @@ struct LogSessionView: View {
 
                     section("Focus") {
                         FlowLayout(spacing: 8) {
-                            ForEach(TrainingSession.focusOptions, id: \.self) { tag in
+                            ForEach(focusOptions, id: \.self) { tag in
                                 ChipButton(title: tag, isOn: focus.contains(tag), style: .accent) {
                                     if focus.contains(tag) { focus.remove(tag) } else { focus.insert(tag) }
                                 }
@@ -97,7 +101,7 @@ struct LogSessionView: View {
                     }
 
                     section("Notes") {
-                        TextField("What clicked? What to work on next time?", text: $notes, axis: .vertical)
+                        TextField(notesPrompt, text: $notes, axis: .vertical)
                             .lineLimit(3...6)
                             .padding(12)
                             .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -136,7 +140,16 @@ struct LogSessionView: View {
         case .team: return .teams
         case .skills: return .skills
         case .fitness: return .fitness
+        case .mental: return .mental
         }
+    }
+
+    private var focusOptions: [String] { TrainingSession.focusOptions(for: category) }
+
+    private var notesPrompt: String {
+        category == .mental
+            ? "Game plan, cues to remember, how you'll prepare for the next game"
+            : "What clicked? What to work on next time?"
     }
 
     private var selectedProgramID: String? {
@@ -156,7 +169,7 @@ struct LogSessionView: View {
     private func save() {
         guard let id = selectedProgramID else { return }
         store.addSession(TrainingSession(date: date, programID: id, category: category, minutes: minutes, effort: effort,
-                                         focus: TrainingSession.focusOptions.filter { focus.contains($0) },
+                                         focus: focusOptions.filter { focus.contains($0) },
                                          notes: notes.trimmingCharacters(in: .whitespacesAndNewlines)))
         dismiss()
     }

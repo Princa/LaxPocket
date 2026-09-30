@@ -174,7 +174,23 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(Program.suggestedMonogram(for: "  "), "?")
         XCTAssertEqual(Program.defaultCategory(for: .skills), .skills)
         XCTAssertNil(Program.defaultCategory(for: .showcases))
+        XCTAssertEqual(Program.defaultCategory(for: .mental), .mental)
         XCTAssertNotEqual(Program.newID(), Program.newID())
+    }
+
+    func testMentalProgramsSavedWithoutACategoryLogAsMental() {
+        let old = Program(id: "mc", name: "Mental coach", detail: "", group: .mental, sessionCategory: nil, monogram: "MC")
+        XCTAssertEqual(old.loggedCategory, .mental)
+        let showcase = Program(id: "s", name: "Showcase", detail: "", group: .showcases, sessionCategory: nil, monogram: "S")
+        XCTAssertNil(showcase.loggedCategory)
+        let club = Program(id: "c", name: "Club", detail: "", group: .teams, sessionCategory: .team, monogram: "C")
+        XCTAssertEqual(club.loggedCategory, .team)
+    }
+
+    func testMentalSessionsOfferMentalFocusTags() {
+        XCTAssertTrue(TrainingSession.focusOptions(for: .mental).contains("Game plan"))
+        XCTAssertTrue(TrainingSession.focusOptions(for: .mental).contains("Pre-game routine"))
+        XCTAssertEqual(TrainingSession.focusOptions(for: .skills), TrainingSession.focusOptions)
     }
 
     func testSessionCountByProgram() {

@@ -1,13 +1,14 @@
 import SwiftUI
 import LaxPocketCore
 
-/// Documents shared with the mental performance coach, kept in Google Drive and opened by link.
+/// Sessions with the mental performance coach, and documents shared with them in Google Drive.
 struct MindsetView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
     @Environment(\.openURL) private var openURL
     @State private var folder: DocFolder?
     @State private var showLink = false
+    @State private var showLogSession = false
 
     var body: some View {
         let docs = store.data.docs.sorted { $0.updatedAt > $1.updatedAt }
@@ -19,7 +20,7 @@ struct MindsetView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     ScreenTitle(text: "Mental game")
-                    Text("Docs with your mental coach, linked from Google Drive.").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                    Text("Sessions and docs with your mental coach.").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
                 }
 
                 HStack(spacing: 12) {
@@ -59,6 +60,8 @@ struct MindsetView: View {
                     .padding(14)
                     .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 }
+
+                sessionsSection()
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -104,6 +107,48 @@ struct MindsetView: View {
             }
         }
         .sheet(isPresented: $showLink) { LinkDocView() }
+        .sheet(isPresented: $showLogSession) { LogSessionView(category: .mental) }
+    }
+
+    /// The latest mental sessions: going over the game plan, pre-game preparation and the like.
+    private func sessionsSection() -> some View {
+        let sessions = store.data.sessions.filter { $0.category == .mental }.sorted { $0.date > $1.date }
+        let recent = sessions.prefix(3)
+        return VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "Sessions") {
+                Text("\(Formatters.hours(Workload.hours(for: sessions).mental)) h this season")
+                    .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+            }
+            .padding(.top, 6)
+            if recent.isEmpty {
+                Card {
+                    Text("Log time with your coach going over the game plan, pre-game preparation or a game review.")
+                        .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Card(padding: 0) {
+                    ForEach(Array(recent.enumerated()), id: \.element.id) { index, session in
+                        VStack(alignment: .leading, spacing: 0) {
+                            SessionRow(session: session, programName: store.program(session.programID)?.name ?? "Mental session")
+                            if !session.notes.isEmpty {
+                                Text(session.notes)
+                                    .font(.system(size: 13)).foregroundStyle(AppTheme.ink2)
+                                    .lineLimit(3)
+                                    .padding(.bottom, 12)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        if index < recent.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                    }
+                }
+            }
+            Button { showLogSession = true } label: {
+                Label("Log a mental session", systemImage: "plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+        }
     }
 
     private func reviewCard(_ doc: MentalDoc) -> some View {
