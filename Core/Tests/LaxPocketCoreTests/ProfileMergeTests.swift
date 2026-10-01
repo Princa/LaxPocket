@@ -144,6 +144,32 @@ final class ProfileMergeTests: XCTestCase {
         XCTAssertEqual(Set(deleted.changes.bodyMeasurements.deletes), Set(season.bodyMeasurements.map(\.id)))
     }
 
+    func testWallballMergesLikeOtherRows() {
+        var local = season
+        local.wallballSessions[0].sets[1].reps = 45
+        local.wallballDrills.append(WallballDrill(name: "Cross-body catch"))
+        var remote = season
+        remote.wallballSessions.remove(at: 1)
+        remote.wallballDrills[0].defaultReps = 25
+
+        let outcome = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: ProfileSnapshot(remote))
+        XCTAssertEqual(outcome.changes.wallballSessions.upserts.map(\.id), [season.wallballSessions[0].id], "a changed set re-sends its session")
+        XCTAssertEqual(outcome.changes.wallballSessions.upserts.first?.sets.count, 4)
+        XCTAssertEqual(outcome.changes.wallballDrills.upserts.map(\.name), ["Cross-body catch"])
+        let merged = outcome.merged.appData
+        XCTAssertEqual(merged.wallballSessions.map(\.id), [season.wallballSessions[0].id])
+        XCTAssertEqual(merged.wallballSessions[0].sets[1].reps, 45)
+        XCTAssertEqual(merged.wallballDrills.first { $0.id == "twister" }?.defaultReps, 25)
+        XCTAssertEqual(merged.wallballDrills.count, 3)
+
+        local = season
+        local.wallballSessions.removeAll()
+        local.wallballDrills.removeAll { $0.id == "twister" }
+        let deleted = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: base)
+        XCTAssertEqual(Set(deleted.changes.wallballSessions.deletes), Set(season.wallballSessions.map(\.id)))
+        XCTAssertEqual(deleted.changes.wallballDrills.deletes, ["twister"])
+    }
+
     /// An event merges as one unit: editing a goal re-sends the whole event with its children.
     func testEventChildrenTravelWithTheEvent() {
         var local = season

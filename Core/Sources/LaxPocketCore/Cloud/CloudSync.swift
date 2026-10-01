@@ -42,10 +42,14 @@ public struct CloudSync: Sendable {
         let expenses = try await client.select(ExpenseRow.table, filters: byProfile, order: "id", as: ExpenseRow.self)
         let docs = try await client.select(MentalDocRow.table, filters: byProfile, order: "id", as: MentalDocRow.self)
         let body = try await client.select(BodyMeasurementRow.table, filters: byProfile, order: "id", as: BodyMeasurementRow.self)
+        let drills = try await client.select(WallballDrillRow.table, filters: byProfile, order: "sort_order,id", as: WallballDrillRow.self)
+        let wallball = try await client.select(WallballSessionRow.table, filters: byProfile, order: "id", as: WallballSessionRow.self)
+        let wallballSets = try await client.select(WallballSetRow.table, filters: byProfile, order: "session_id,position,drill_id,hand", as: WallballSetRow.self)
 
         return ProfileSnapshot.assemble(profile: profile, programs: programs, sessions: sessions, results: results, measurements: measurements,
                                         events: events, stats: stats, reflections: reflections, focus: focus, videos: videos,
-                                        checklist: checklist, expenses: expenses, docs: docs, bodyMeasurements: body)
+                                        checklist: checklist, expenses: expenses, docs: docs, bodyMeasurements: body,
+                                        wallballDrills: drills, wallballSessions: wallball, wallballSets: wallballSets)
     }
 
     /// Writes changes for one profile. Parents go before children and deletes go last, so foreign keys hold at every step.
@@ -81,6 +85,13 @@ public struct CloudSync: Sendable {
         try await client.upsert(changes.docs.upserts)
         try await client.upsert(changes.bodyMeasurements.upserts)
 
+        // A changed wall ball session replaces its sets.
+        try await client.upsert(changes.wallballDrills.upserts)
+        let wallball = changes.wallballSessions.upserts
+        try await client.upsert(wallball.map(\.session))
+        try await client.delete(WallballSetRow.table, where: "session_id", in: wallball.map { $0.id.uuidString.lowercased() }, filters: byProfile)
+        try await client.upsert(wallball.flatMap(\.sets))
+
         func ids(_ keys: [UUID]) -> [String] { keys.map { $0.uuidString.lowercased() } }
         try await client.delete(SessionRow.table, where: "id", in: ids(changes.sessions.deletes), filters: byProfile)
         try await client.delete(CombineResultRow.table, where: "id", in: ids(changes.combineResults.deletes), filters: byProfile)
@@ -88,6 +99,8 @@ public struct CloudSync: Sendable {
         try await client.delete(ExpenseRow.table, where: "id", in: ids(changes.expenses.deletes), filters: byProfile)
         try await client.delete(MentalDocRow.table, where: "id", in: ids(changes.docs.deletes), filters: byProfile)
         try await client.delete(BodyMeasurementRow.table, where: "id", in: ids(changes.bodyMeasurements.deletes), filters: byProfile)
+        try await client.delete(WallballSessionRow.table, where: "id", in: ids(changes.wallballSessions.deletes), filters: byProfile)
+        try await client.delete(WallballDrillRow.table, where: "id", in: changes.wallballDrills.deletes, filters: byProfile)
         // Programs last: sessions that pointed at them are gone by now.
         try await client.delete(ProgramRow.table, where: "id", in: changes.programs.deletes, filters: byProfile)
     }
@@ -129,7 +142,8 @@ extension ProfileSnapshot {
     static func assemble(profile: ProfileRow, programs: [ProgramRow], sessions: [SessionRow], results: [CombineResultRow],
                          measurements: [CombineMeasurementRow], events: [EventRow], stats: [GameStatsRow], reflections: [ReflectionRow],
                          focus: [FocusGoalRow], videos: [VideoRow], checklist: [ChecklistItemRow], expenses: [ExpenseRow],
-                         docs: [MentalDocRow], bodyMeasurements: [BodyMeasurementRow]) -> ProfileSnapshot {
+                         docs: [MentalDocRow], bodyMeasurements: [BodyMeasurementRow], wallballDrills: [WallballDrillRow] = [],
+                         wallballSessions: [WallballSessionRow] = [], wallballSets: [WallballSetRow] = []) -> ProfileSnapshot {
         let metricOrder = Dictionary(uniqueKeysWithValues: CombineMetric.allCases.enumerated().map { ($1, $0) })
         let measurementsByResult = Dictionary(grouping: measurements, by: \.resultID)
         let statsByEvent = Dictionary(stats.map { ($0.eventID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -137,6 +151,7 @@ extension ProfileSnapshot {
         let focusByEvent = Dictionary(grouping: focus, by: \.eventID)
         let videosByEvent = Dictionary(grouping: videos, by: \.eventID)
         let checklistByEvent = Dictionary(grouping: checklist, by: \.eventID)
+        let setsBySession = Dictionary(grouping: wallballSets, by: \.sessionID)
 
         return ProfileSnapshot(
             profile: profile,
@@ -153,7 +168,11 @@ extension ProfileSnapshot {
             },
             expenses: expenses,
             docs: docs,
-            bodyMeasurements: bodyMeasurements
+            bodyMeasurements: bodyMeasurements,
+            wallballDrills: wallballDrills,
+            wallballSessions: wallballSessions.map { s in
+                WallballBundle(session: s, sets: (setsBySession[s.id] ?? []).sorted { $0.position < $1.position })
+            }
         )
     }
 }

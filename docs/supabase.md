@@ -12,7 +12,7 @@ LaxPocket is local-first: every athlete's data lives in a JSON file on the phone
 4. **Connect the app.** `LaxPocket/Resources/Supabase.plist` holds the **Project URL** and the **anon** (or *publishable*) key; this repository's copy already points at the LaxPocket project. For a different project, replace both values (they're under the project's **Connect** button, or in **Project Settings → API Keys**); [`supabase/Supabase.example.plist`](../supabase/Supabase.example.plist) is a blank template. Then run `xcodegen generate` and build.
 5. **Sign in on the phone.** In the app: **Theme & settings → Cloud sync → Create an account**, confirm the email, then **Sign in**. Every athlete on the phone uploads. On a second phone, sign in with the same account and the athletes come down.
 
-**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql).
+**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql), and wall ball needs [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql).
 
 The anon key is designed to ship inside apps. It only lets a client talk to the API; row-level security decides what each signed-in account can read or write. Never put the `service_role` key in the app.
 
@@ -20,7 +20,7 @@ Once your own accounts exist, you can turn off **Allow new users to sign up** in
 
 ## Schema
 
-The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, and [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
+The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight, and [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql) adds wall ball. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
 
 ```mermaid
 erDiagram
@@ -40,6 +40,9 @@ erDiagram
     profiles ||--o{ expenses : ""
     profiles ||--o{ mental_docs : ""
     profiles ||--o{ body_measurements : ""
+    profiles ||--o{ wallball_drills : ""
+    profiles ||--o{ wallball_sessions : ""
+    wallball_sessions ||--o{ wallball_sets : ""
 ```
 
 | Table | One row per | Key columns |
@@ -58,6 +61,9 @@ erDiagram
 | `event_checklist_items` | prep checklist item | `position`, `title`, `done` |
 | `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note` |
 | `body_measurements` | height and weight check | `measured_at`, `height_cm` (0.1 cm, 50–250), `weight_kg` (0.01 kg, 10–250), `note`. Either value can be null, not both. Always metric; `profiles.body_units` only sets how the app shows them |
+| `wallball_drills` | drill the athlete added or changed | primary key (`profile_id`, `id`); `name`, `hands` (`each`: right and left counted separately, `together`: one count), `default_reps` (1–500), `hidden`. The built-in routine lives in the app, so only the athlete's own drills and edited built-ins are stored |
+| `wallball_sessions` | day's wall ball, or a timed challenge | `done_at`, `minutes`, `challenge_seconds` (5–3600, set for a challenge), `notes` |
+| `wallball_sets` | reps of one drill with one hand | primary key (`session_id`, `drill_id`, `hand`); `hand` (`right` / `left` / `both`), `reps` (1–5000), `position`. `drill_id` has no foreign key because it can name a built-in drill |
 | `mental_docs` | linked Drive document | `url`, `folder`, `kind`, `status`, when and by whom the document was last updated. The file itself stays in Google Drive |
 
 Design choices:
@@ -96,7 +102,7 @@ Merge rules, per row:
 - changed on both sides → **this phone wins**;
 - deleted on one side and edited on the other → **the edit wins**, so nothing someone typed is lost.
 
-An event syncs as one unit together with its stats, reflection, goals, videos and checklist, and so does a testing day with its results. The writes aren't a single transaction, but they can safely be repeated: if a sync stops halfway, the next one sees what already arrived and sends the rest.
+An event syncs as one unit together with its stats, reflection, goals, videos and checklist, and so do a testing day with its results and a wall ball session with its sets. The writes aren't a single transaction, but they can safely be repeated: if a sync stops halfway, the next one sees what already arrived and sends the rest.
 
 The app syncs a few seconds after each change, when it comes to the foreground, and from **Sync now**. Deleting an athlete on a phone only removes it from that phone. The cloud copy is listed under *In the cloud, not on this iPhone*, where it can be downloaded again or deleted for everyone.
 

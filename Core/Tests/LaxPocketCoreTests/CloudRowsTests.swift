@@ -64,6 +64,8 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertEqual(rebuilt.expenses.map(\.amount).sorted(), [320.5, 1850])
         XCTAssertEqual(rebuilt.bodyMeasurements, data.bodyMeasurements)
         XCTAssertEqual(rebuilt.profile.bodyUnits, .metric)
+        XCTAssertEqual(rebuilt.wallballDrills, data.wallballDrills)
+        XCTAssertEqual(rebuilt.wallballSessions, data.wallballSessions)
 
         let json = try JSONEncoder().encode(snapshot)
         XCTAssertEqual(try JSONDecoder().decode(ProfileSnapshot.self, from: json), snapshot)
@@ -80,6 +82,11 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertFalse(ProfileSnapshot(shuffled).hasSameRows(as: ProfileSnapshot(data)))
         shuffled = data
         shuffled.bodyMeasurements[0].weightKg = 50
+        XCTAssertFalse(ProfileSnapshot(shuffled).hasSameRows(as: ProfileSnapshot(data)))
+        shuffled = data
+        shuffled.wallballSessions.reverse()
+        XCTAssertTrue(ProfileSnapshot(shuffled).hasSameRows(as: ProfileSnapshot(data)))
+        shuffled.wallballSessions[0].sets[0].reps = 1
         XCTAssertFalse(ProfileSnapshot(shuffled).hasSameRows(as: ProfileSnapshot(data)))
     }
 
@@ -115,17 +122,39 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertEqual(rows[1].weightKg, 49)
     }
 
+    func testWallballRowsAreKeptInRange() {
+        var data = Fixtures.season()
+        data.wallballDrills = [WallballDrill(id: "mine", name: "  ", defaultReps: 0)]
+        data.wallballSessions = [
+            WallballSession(date: Fixtures.day(0), sets: [
+                WallballSet(drillID: "overhand", hand: .right, reps: 30), WallballSet(drillID: "sidearm", hand: .left, reps: 0),
+                WallballSet(drillID: "overhand", hand: .right, reps: 20), WallballSet(drillID: "overhand", hand: .left, reps: 9_000)
+            ], minutes: 0, challengeSeconds: 1)
+        ]
+        let snapshot = ProfileSnapshot(data)
+        XCTAssertEqual(snapshot.wallballDrills[0].name, "Drill", "a blank name would fail the database check")
+        XCTAssertEqual(snapshot.wallballDrills[0].defaultReps, 1)
+        let bundle = snapshot.wallballSessions[0]
+        XCTAssertNil(bundle.session.minutes)
+        XCTAssertNil(bundle.session.challengeSeconds)
+        XCTAssertEqual(bundle.sets.map(\.reps), [50, 5000], "repeats of a drill and hand add up, empty sets are dropped, reps are capped")
+        XCTAssertEqual(bundle.sets.map(\.position), [0, 1])
+    }
+
     /// Sync records written before height and weight tracking still load, so the next sync has its base.
     func testReadsSyncRecordsFromBeforeHeightAndWeight() throws {
         let snapshot = ProfileSnapshot(Fixtures.season())
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: AppData.encoder.encode(snapshot)) as? [String: Any])
         object["bodyMeasurements"] = nil
+        object["wallballDrills"] = nil
+        object["wallballSessions"] = nil
         var profile = try XCTUnwrap(object["profile"] as? [String: Any])
         profile["body_units"] = nil
         object["profile"] = profile
 
         let old = try AppData.decoder.decode(ProfileSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
         XCTAssertTrue(old.bodyMeasurements.isEmpty)
+        XCTAssertTrue(old.wallballSessions.isEmpty)
         XCTAssertEqual(old.profile.bodyUnits, .imperial)
         XCTAssertEqual(old.sessions, snapshot.sessions)
     }
@@ -162,6 +191,10 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertEqual(try keys(snapshot.bodyMeasurements[0]), Set(BodyMeasurementRow.columns))
         XCTAssertEqual(try keys(snapshot.bodyMeasurements[2]), Set(BodyMeasurementRow.columns).subtracting(["height_cm"]),
                        "a weigh-in without a height writes a null height")
+        try check(snapshot.wallballDrills[0])
+        try check(snapshot.wallballSessions[0].sets[0])
+        XCTAssertEqual(try keys(snapshot.wallballSessions[0].session), Set(WallballSessionRow.columns).subtracting(["challenge_seconds"]))
+        XCTAssertEqual(try keys(snapshot.wallballSessions[1].session), Set(WallballSessionRow.columns).subtracting(["minutes"]))
     }
 
     func testDecodesPostgRESTRows() throws {

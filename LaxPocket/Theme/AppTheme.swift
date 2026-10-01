@@ -61,6 +61,15 @@ struct AppTheme {
         }
     }
 
+    /// Wall ball reps by hand: right in the primary colour, left in the accent, both-hands drills in the third.
+    func color(for hand: WallballHand) -> Color {
+        switch hand {
+        case .right: return primary
+        case .left: return accent
+        case .both: return third
+        }
+    }
+
     func tierColors(_ tier: Tier) -> (background: Color, foreground: Color) {
         switch tier {
         case .elite: return (primary, .white)
