@@ -1,101 +1,83 @@
 import SwiftUI
 import LaxPocketCore
 
+/// One season's budget: spending against the season budget, by program and by category, and the expenses.
 struct BudgetView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
-    @State private var showAdd = false
+    /// Nil follows the season the profile is set to.
+    @State private var pickedSeason: Int?
+    @State private var editing: ExpenseEditTarget?
+    @State private var showBudgetEditor = false
     @State private var showAll = false
 
     var body: some View {
-        let expenses = store.data.expenses.sorted { $0.date > $1.date }
-        let summary = BudgetMath.summary(expenses: expenses, budget: store.data.seasonBudget)
-        let nextShowcase = Season.upcoming(store.data.events, from: store.now).first { $0.kind == .showcase }
+        let data = store.data
+        let current = data.profile.currentSeason(now: store.now)
+        let season = pickedSeason ?? current
+        let overview = BudgetMath.season(season, in: data)
+        let expenses = data.expenses(in: season).sorted { $0.date > $1.date }
+        let nextShowcase = season == current ? Season.upcoming(data.events, from: store.now).first { $0.kind == .showcase } : nil
         let recent = showAll ? expenses : Array(expenses.prefix(5))
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ScreenTitle(text: "Budget")
-                        Text("\(store.profile.season) season · all amounts CAD").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
-                    }
-                    Spacer()
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(theme.primary, in: Circle())
-                    }
-                    .accessibilityLabel("Add an expense")
-                }
+                header(season: season, current: current)
+                summaryCard(overview, nextShowcase: nextShowcase)
 
-                Card(padding: 20, radius: 20) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Spent so far").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(Formatters.money(summary.spent)).font(.display(54)).foregroundStyle(theme.primary)
-                                Text("of \(Formatters.money(summary.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
+                if !overview.programs.isEmpty {
+                    SectionHeader(title: "By program").padding(.top, 8)
+                    Card(padding: 0) {
+                        ForEach(Array(overview.programs.enumerated()), id: \.element.id) { index, line in
+                            NavigationLink { ProgramBudgetView(programID: line.program?.id, season: season) } label: {
+                                programRow(line).padding(.horizontal, 14)
                             }
-                        }
-                        ProgressView(value: min(summary.fractionUsed, 1))
-                            .tint(summary.isOverBudget ? theme.accentText : theme.primary)
-                            .scaleEffect(x: 1, y: 2, anchor: .center)
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(Formatters.money(summary.remaining)).font(.display(24))
-                                Text(summary.isOverBudget ? "Over budget" : "Remaining").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(Int((summary.fractionUsed * 100).rounded()))%").font(.display(24))
-                                Text("Of budget used").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if let showcase = nextShowcase {
-                            Text("Coming up: \(showcase.title) travel & lodging")
-                                .font(.system(size: 14))
-                                .foregroundStyle(theme.accentText)
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(theme.accentTint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .buttonStyle(.plain)
+                            if index < overview.programs.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
                 }
 
-                if !summary.byCategory.isEmpty {
+                if !overview.summary.byCategory.isEmpty {
                     SectionHeader(title: "By category").padding(.top, 8)
                     Card(padding: 0) {
-                        ForEach(Array(summary.byCategory.enumerated()), id: \.element.id) { index, row in
+                        ForEach(Array(overview.summary.byCategory.enumerated()), id: \.element.id) { index, row in
                             categoryRow(row, expenses: expenses).padding(.horizontal, 16)
-                            if index < summary.byCategory.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 16) }
+                            if index < overview.summary.byCategory.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 16) }
                         }
                     }
                 }
 
-                SectionHeader(title: "Recent") {
+                SectionHeader(title: "Expenses") {
                     if expenses.count > 5 {
-                        Button(showAll ? "Show less" : "See all") { showAll.toggle() }
+                        Button(showAll ? "Show less" : "See all \(expenses.count)") { showAll.toggle() }
                             .font(.system(size: 14, weight: .semibold))
                     }
                 }
                 .padding(.top, 8)
 
                 if expenses.isEmpty {
-                    Card { Text("No expenses yet. Tap + to add fees, coaching, travel or gear.").font(.system(size: 14)).foregroundStyle(AppTheme.ink2) }
+                    Card {
+                        Text("No expenses for \(AthleteProfile.seasonLabel(start: season)) yet. Tap + to add fees, coaching, travel or gear.")
+                            .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                    }
                 } else {
                     Card(padding: 0) {
                         ForEach(Array(recent.enumerated()), id: \.element.id) { index, expense in
-                            expenseRow(expense).padding(.horizontal, 14)
-                                .contextMenu {
-                                    Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
-                                }
+                            Button { editing = ExpenseEditTarget(expense: expense, season: season) } label: {
+                                ExpenseListRow(expense: expense)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .contextMenu {
+                                Button { editing = ExpenseEditTarget(expense: expense, season: season) } label: { Label("Edit", systemImage: "pencil") }
+                                Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
+                            }
                             if index < recent.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
+                    Text("Tap an expense to change it or add notes.")
+                        .font(.system(size: 12)).foregroundStyle(AppTheme.caption).padding(.horizontal, 4)
                 }
             }
             .padding(.horizontal, 16)
@@ -103,7 +85,144 @@ struct BudgetView: View {
         }
         .background(AppTheme.background)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showAdd) { AddExpenseView() }
+        .sheet(item: $editing) { target in ExpenseEditorView(expense: target.expense, programID: target.programID, season: target.season) }
+        .sheet(isPresented: $showBudgetEditor) { BudgetEditorView(season: season, data: store.data) }
+    }
+
+    // MARK: - Pieces
+
+    private func header(season: Int, current: Int) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                ScreenTitle(text: "Budget")
+                HStack(spacing: 4) {
+                    Menu {
+                        Picker("Season", selection: Binding(get: { season }, set: { pickedSeason = $0 == current ? nil : $0 })) {
+                            ForEach(store.data.budgetSeasons(current: current), id: \.self) { s in
+                                Text(s == current ? "\(AthleteProfile.seasonLabel(start: s)) (this season)" : AthleteProfile.seasonLabel(start: s)).tag(s)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(AthleteProfile.seasonLabel(start: season)) season")
+                            Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                    }
+                    .accessibilityLabel("Season: \(AthleteProfile.seasonLabel(start: season))")
+                    Text("· all amounts CAD").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                }
+            }
+            Spacer()
+            Button { editing = ExpenseEditTarget(season: season) } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(theme.primary, in: Circle())
+            }
+            .accessibilityLabel("Add an expense")
+        }
+    }
+
+    private func summaryCard(_ overview: SeasonBudgetSummary, nextShowcase: SeasonEvent?) -> some View {
+        let summary = overview.summary
+        return Card(padding: 20, radius: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Spent so far").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(Formatters.money(summary.spent)).font(.display(54)).foregroundStyle(theme.primary)
+                            if summary.budget > 0 {
+                                Text("of \(Formatters.money(summary.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
+                            }
+                        }
+                    }
+                    Spacer()
+                    Button { showBudgetEditor = true } label: {
+                        Label(summary.budget > 0 ? "Edit budget" : "Set budget", systemImage: "pencil")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(theme.primary)
+                }
+                if summary.budget > 0 {
+                    ProgressView(value: min(summary.fractionUsed, 1))
+                        .tint(summary.isOverBudget ? theme.accentText : theme.primary)
+                        .scaleEffect(x: 1, y: 2, anchor: .center)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Formatters.money(abs(summary.remaining))).font(.display(24))
+                            Text(summary.isOverBudget ? "Over budget" : "Remaining").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(Int((summary.fractionUsed * 100).rounded()))%").font(.display(24))
+                            Text("Of budget used").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if overview.overall == 0 {
+                        Text("No season budget set, so this is the program budgets added up.")
+                            .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                    } else if overview.allocated > 0 {
+                        Text("\(Formatters.money(overview.allocated)) set aside for programs\(overview.isOverAllocated ? ", more than the season budget" : "").")
+                            .font(.system(size: 12, weight: overview.isOverAllocated ? .semibold : .regular))
+                            .foregroundStyle(overview.isOverAllocated ? theme.accentText : AppTheme.caption)
+                    }
+                } else {
+                    Text("No budget for this season yet. Set one for the season and for each program.")
+                        .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                }
+                if let showcase = nextShowcase {
+                    Text("Coming up: \(showcase.title) travel & lodging")
+                        .font(.system(size: 14))
+                        .foregroundStyle(theme.accentText)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(theme.accentTint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private func programRow(_ line: ProgramSpend) -> some View {
+        HStack(spacing: 12) {
+            Monogram(text: line.program?.monogram ?? "•", background: line.program == nil ? AppTheme.background : theme.primaryTint,
+                     foreground: line.program == nil ? AppTheme.caption : theme.primary, size: 36)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(line.program?.name ?? "Not for a program").font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                    Spacer()
+                    Text(Formatters.money(line.spent)).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                }
+                if line.budget > 0 {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(AppTheme.background)
+                            Capsule().fill(line.isOverBudget ? theme.accentText : theme.primary)
+                                .frame(width: proxy.size.width * min(line.fractionUsed, 1))
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                HStack {
+                    Text(line.expenseCount == 1 ? "1 expense" : "\(line.expenseCount) expenses")
+                    Spacer()
+                    Text(line.budget > 0 ? (line.isOverBudget ? "\(Formatters.money(-line.remaining)) over \(Formatters.money(line.budget))"
+                                                              : "\(Formatters.money(line.remaining)) left of \(Formatters.money(line.budget))")
+                                         : (line.program == nil ? "" : "No budget"))
+                        .foregroundStyle(line.isOverBudget ? theme.accentText : AppTheme.caption)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(AppTheme.caption)
+            }
+            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron)
+        }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private func categoryRow(_ row: CategorySpend, expenses: [Expense]) -> some View {
@@ -131,66 +250,5 @@ struct BudgetView: View {
         }
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-    }
-
-    private func expenseRow(_ expense: Expense) -> some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 0) {
-                Text(Formatters.monthShort(expense.date)).font(.system(size: 10, weight: .bold)).foregroundStyle(AppTheme.caption)
-                Text(Formatters.dayNumber(expense.date)).font(.display(22))
-            }
-            .frame(width: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(expense.title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(expense.note.isEmpty ? expense.category.title : "\(expense.category.title) · \(expense.note)")
-                    .font(.system(size: 13)).foregroundStyle(AppTheme.caption)
-            }
-            Spacer()
-            Text(Formatters.money(expense.amount)).font(.system(size: 15, weight: .semibold))
-        }
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-struct AddExpenseView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    @State private var amountText = ""
-    @State private var category: ExpenseCategory = .coaching
-    @State private var date = Date()
-    @State private var note = ""
-
-    private var amount: Double? { Double(amountText.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")) }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("What was it? e.g. NextLevel · 5-pack", text: $title)
-                    TextField("Amount (CAD)", text: $amountText).keyboardType(.decimalPad)
-                    Picker("Category", selection: $category) {
-                        ForEach(ExpenseCategory.allCases) { Text($0.title).tag($0) }
-                    }
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    TextField("Note (optional)", text: $note)
-                }
-            }
-            .navigationTitle("Add expense")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        guard let amount else { return }
-                        store.addExpense(Expense(date: date, title: title.isEmpty ? category.title : title, category: category, amount: amount, note: note))
-                        dismiss()
-                    }
-                    .fontWeight(.bold)
-                    .disabled(amount == nil)
-                }
-            }
-        }
     }
 }

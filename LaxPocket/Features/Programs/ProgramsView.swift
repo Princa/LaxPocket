@@ -70,7 +70,8 @@ struct ProgramsView: View {
             Monogram(text: program.monogram, background: badgeBackground(group), foreground: badgeForeground(group))
             VStack(alignment: .leading, spacing: 2) {
                 Text(program.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
-                Text(program.detail).font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                Text([program.detail, program.seasonsText].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.system(size: 13)).foregroundStyle(AppTheme.caption)
             }
             Spacer()
             trailing(program, group: group, hours: hours)

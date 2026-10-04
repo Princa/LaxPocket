@@ -45,11 +45,14 @@ public struct CloudSync: Sendable {
         let drills = try await client.select(WallballDrillRow.table, filters: byProfile, order: "sort_order,id", as: WallballDrillRow.self)
         let wallball = try await client.select(WallballSessionRow.table, filters: byProfile, order: "id", as: WallballSessionRow.self)
         let wallballSets = try await client.select(WallballSetRow.table, filters: byProfile, order: "session_id,position,drill_id,hand", as: WallballSetRow.self)
+        let seasonBudgets = try await client.select(SeasonBudgetRow.table, filters: byProfile, order: "season", as: SeasonBudgetRow.self)
+        let programBudgets = try await client.select(ProgramBudgetRow.table, filters: byProfile, order: "season,program_id", as: ProgramBudgetRow.self)
 
         return ProfileSnapshot.assemble(profile: profile, programs: programs, sessions: sessions, results: results, measurements: measurements,
                                         events: events, stats: stats, reflections: reflections, focus: focus, videos: videos,
                                         checklist: checklist, expenses: expenses, docs: docs, bodyMeasurements: body,
-                                        wallballDrills: drills, wallballSessions: wallball, wallballSets: wallballSets)
+                                        wallballDrills: drills, wallballSessions: wallball, wallballSets: wallballSets,
+                                        seasonBudgets: seasonBudgets, programBudgets: programBudgets)
     }
 
     /// Writes changes for one profile. Parents go before children and deletes go last, so foreign keys hold at every step.
@@ -57,7 +60,9 @@ public struct CloudSync: Sendable {
         if let profile = changes.profile { try await client.upsert([profile]) }
         let byProfile = [URLQueryItem(name: "profile_id", value: "eq.\(changes.profileID.uuidString.lowercased())")]
 
+        try await client.upsert(changes.seasonBudgets.upserts)
         try await client.upsert(changes.programs.upserts)
+        try await client.upsert(changes.programBudgets.upserts)
         try await client.upsert(changes.sessions.upserts)
 
         // A changed testing day replaces its measurements.
@@ -101,6 +106,11 @@ public struct CloudSync: Sendable {
         try await client.delete(BodyMeasurementRow.table, where: "id", in: ids(changes.bodyMeasurements.deletes), filters: byProfile)
         try await client.delete(WallballSessionRow.table, where: "id", in: ids(changes.wallballSessions.deletes), filters: byProfile)
         try await client.delete(WallballDrillRow.table, where: "id", in: changes.wallballDrills.deletes, filters: byProfile)
+        try await client.delete(SeasonBudgetRow.table, where: "season", in: changes.seasonBudgets.deletes.map(String.init), filters: byProfile)
+        for (programID, keys) in Dictionary(grouping: changes.programBudgets.deletes, by: \.programID).sorted(by: { $0.key < $1.key }) {
+            try await client.delete(ProgramBudgetRow.table, where: "season", in: keys.map { String($0.season) },
+                                    filters: byProfile + [URLQueryItem(name: "program_id", value: "eq.\(programID)")])
+        }
         // Programs last: sessions that pointed at them are gone by now.
         try await client.delete(ProgramRow.table, where: "id", in: changes.programs.deletes, filters: byProfile)
     }
@@ -143,7 +153,8 @@ extension ProfileSnapshot {
                          measurements: [CombineMeasurementRow], events: [EventRow], stats: [GameStatsRow], reflections: [ReflectionRow],
                          focus: [FocusGoalRow], videos: [VideoRow], checklist: [ChecklistItemRow], expenses: [ExpenseRow],
                          docs: [MentalDocRow], bodyMeasurements: [BodyMeasurementRow], wallballDrills: [WallballDrillRow] = [],
-                         wallballSessions: [WallballSessionRow] = [], wallballSets: [WallballSetRow] = []) -> ProfileSnapshot {
+                         wallballSessions: [WallballSessionRow] = [], wallballSets: [WallballSetRow] = [],
+                         seasonBudgets: [SeasonBudgetRow] = [], programBudgets: [ProgramBudgetRow] = []) -> ProfileSnapshot {
         let metricOrder = Dictionary(uniqueKeysWithValues: CombineMetric.allCases.enumerated().map { ($1, $0) })
         let measurementsByResult = Dictionary(grouping: measurements, by: \.resultID)
         let statsByEvent = Dictionary(stats.map { ($0.eventID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -172,7 +183,9 @@ extension ProfileSnapshot {
             wallballDrills: wallballDrills,
             wallballSessions: wallballSessions.map { s in
                 WallballBundle(session: s, sets: (setsBySession[s.id] ?? []).sorted { $0.position < $1.position })
-            }
+            },
+            seasonBudgets: seasonBudgets,
+            programBudgets: programBudgets
         )
     }
 }

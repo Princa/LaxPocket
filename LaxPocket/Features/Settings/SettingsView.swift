@@ -64,7 +64,7 @@ struct SettingsView: View {
                     Stepper(value: binding(\.profile.weeklyGoalHours), in: 1...30, step: 0.5) {
                         LabeledContent("Weekly goal", value: "\(Formatters.hours(store.profile.weeklyGoalHours)) h")
                     }
-                    LabeledContent("Season budget") {
+                    LabeledContent("Season budget (\(AthleteProfile.seasonLabel(start: store.profile.currentSeason())))") {
                         TextField("Budget", value: binding(\.seasonBudget), format: .currency(code: "CAD").precision(.fractionLength(0)))
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
@@ -76,7 +76,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, profile, height and weight history and theme.")
+                    Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, budgets and expenses, profile, height and weight history and theme.")
                 }
             }
             .navigationTitle("Theme & settings")
@@ -85,9 +85,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.fontWeight(.bold) }
             }
             .confirmationDialog("Start a blank season?", isPresented: $confirmBlank, titleVisibility: .visible) {
-                Button("Clear sessions, results, events, expenses and docs", role: .destructive) { store.startBlankSeason() }
+                Button("Clear sessions, results, events and docs", role: .destructive) { store.startBlankSeason() }
             } message: {
-                Text("Your programs, profile, height and weight history and theme stay.")
+                Text("Your programs, budgets and expenses (each belongs to its season), profile, height and weight history and theme stay.")
             }
         }
         .tint(theme.primary)

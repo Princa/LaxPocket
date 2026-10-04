@@ -53,14 +53,36 @@ public struct Program: Identifiable, Codable, Hashable, Sendable {
     public var sessionCategory: SessionCategory?
     /// Two or three letters shown in the program's badge.
     public var monogram: String
+    /// The first and last season the program runs, as the years they start (2026 = 2026/27). Nil means open-ended.
+    public var firstSeason: Int?
+    public var lastSeason: Int?
 
-    public init(id: String, name: String, detail: String, group: ProgramGroup, sessionCategory: SessionCategory?, monogram: String) {
+    public init(id: String, name: String, detail: String, group: ProgramGroup, sessionCategory: SessionCategory?, monogram: String,
+                firstSeason: Int? = nil, lastSeason: Int? = nil) {
         self.id = id
         self.name = name
         self.detail = detail
         self.group = group
         self.sessionCategory = sessionCategory
         self.monogram = monogram
+        self.firstSeason = firstSeason
+        self.lastSeason = lastSeason
+    }
+
+    /// Whether the program runs in a season (given as the year it starts).
+    public func runs(in season: Int) -> Bool {
+        (firstSeason ?? .min) <= season && season <= (lastSeason ?? .max)
+    }
+
+    /// "2026/27", "2026/27 – 2028/29", "From 2026/27", "Until 2027/28", or "" when open-ended.
+    public var seasonsText: String {
+        switch (firstSeason, lastSeason) {
+        case let (first?, last?): return first == last ? AthleteProfile.seasonLabel(start: first)
+            : "\(AthleteProfile.seasonLabel(start: first)) – \(AthleteProfile.seasonLabel(start: last))"
+        case let (first?, nil): return "From \(AthleteProfile.seasonLabel(start: first))"
+        case let (nil, last?): return "Until \(AthleteProfile.seasonLabel(start: last))"
+        case (nil, nil): return ""
+        }
     }
 
     /// A fresh ID for a program added in the app.

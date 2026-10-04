@@ -11,6 +11,8 @@ struct ProgramEditorView: View {
     @State private var group: ProgramGroup
     @State private var category: SessionCategory?
     @State private var monogram: String
+    @State private var firstSeason: Int?
+    @State private var lastSeason: Int?
     @State private var confirmDelete = false
 
     /// Pass an existing program to edit it, or a group to start a new one in.
@@ -21,11 +23,20 @@ struct ProgramEditorView: View {
         _group = State(initialValue: program?.group ?? group)
         _category = State(initialValue: program == nil ? Program.defaultCategory(for: group) : program?.loggedCategory)
         _monogram = State(initialValue: program?.monogram ?? "")
+        _firstSeason = State(initialValue: program?.firstSeason)
+        _lastSeason = State(initialValue: program?.lastSeason)
     }
 
     private var isNew: Bool { store.program(id) == nil }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var sessionCount: Int { store.data.sessionCountByProgram[id] ?? 0 }
+    private var expenseCount: Int { store.data.expenses.filter { $0.programID == id }.count }
+
+    /// A few seasons either side of this one, plus whatever is already set.
+    private var seasonChoices: [Int] {
+        let current = store.profile.currentSeason(now: store.now)
+        return Set(Array((current - 4)...(current + 6)) + [firstSeason, lastSeason].compactMap { $0 }).sorted()
+    }
 
     private var title: String {
         let noun = group == .teams ? "team" : "program"
@@ -56,6 +67,23 @@ struct ProgramEditorView: View {
                 }
 
                 Section {
+                    Picker("First season", selection: $firstSeason) {
+                        Text("Not set").tag(Int?.none)
+                        ForEach(seasonChoices, id: \.self) { Text(AthleteProfile.seasonLabel(start: $0)).tag(Int?.some($0)) }
+                    }
+                    Picker("Last season", selection: $lastSeason) {
+                        Text("Ongoing").tag(Int?.none)
+                        ForEach(seasonChoices.filter { $0 >= (firstSeason ?? .min) }, id: \.self) {
+                            Text(AthleteProfile.seasonLabel(start: $0)).tag(Int?.some($0))
+                        }
+                    }
+                } header: {
+                    Text("Seasons")
+                } footer: {
+                    Text("For a team or program that runs over several seasons, e.g. a club team from 2026/27 to 2028/29. Each season gets its own budget on the Budget screen.")
+                }
+
+                Section {
                     HStack {
                         Text("Badge")
                         Spacer()
@@ -72,10 +100,13 @@ struct ProgramEditorView: View {
                 if !isNew {
                     Section {
                         Button(group == .teams ? "Delete team" : "Delete program", role: .destructive) { confirmDelete = true }
-                            .disabled(sessionCount > 0)
+                            .disabled(sessionCount > 0 || expenseCount > 0)
                     } footer: {
                         if sessionCount > 0 {
                             Text(sessionCount == 1 ? "1 session is logged with this program. Delete it first." : "\(sessionCount) sessions are logged with this program. Delete them first.")
+                        } else if expenseCount > 0 {
+                            Text(expenseCount == 1 ? "1 expense is for this program. Delete it or move it to another program first."
+                                                   : "\(expenseCount) expenses are for this program. Delete them or move them to another program first.")
                         }
                     }
                 }
@@ -89,6 +120,9 @@ struct ProgramEditorView: View {
                 }
             }
             .onChange(of: group) { _, newGroup in category = Program.defaultCategory(for: newGroup) }
+            .onChange(of: firstSeason) { _, first in
+                if let first, let last = lastSeason, last < first { lastSeason = first }
+            }
             .confirmationDialog("Delete \(trimmedName.isEmpty ? "this program" : trimmedName)?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     store.deleteProgram(id)
@@ -101,7 +135,8 @@ struct ProgramEditorView: View {
     private func save() {
         let badge = monogram.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         store.saveProgram(Program(id: id, name: trimmedName, detail: detail.trimmingCharacters(in: .whitespacesAndNewlines), group: group,
-                                  sessionCategory: category, monogram: badge.isEmpty ? Program.suggestedMonogram(for: trimmedName) : String(badge.prefix(3))))
+                                  sessionCategory: category, monogram: badge.isEmpty ? Program.suggestedMonogram(for: trimmedName) : String(badge.prefix(3)),
+                                  firstSeason: firstSeason, lastSeason: lastSeason))
         dismiss()
     }
 }

@@ -49,10 +49,30 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
 
     /// The season a date falls in. Seasons start in August, so Sep 2026 → "2026/27" and Mar 2027 → "2026/27".
     public static func seasonLabel(for date: Date, calendar: Calendar = .laxWeek) -> String {
+        seasonLabel(start: seasonStart(for: date, calendar: calendar))
+    }
+
+    /// The season a date falls in, as the year it starts: Sep 2026 → 2026, Mar 2027 → 2026.
+    public static func seasonStart(for date: Date, calendar: Calendar = .laxWeek) -> Int {
         let year = calendar.component(.year, from: date)
-        let month = calendar.component(.month, from: date)
-        let start = month >= 8 ? year : year - 1
-        return String(format: "%d/%02d", start, (start + 1) % 100)
+        return calendar.component(.month, from: date) >= 8 ? year : year - 1
+    }
+
+    /// 2026 → "2026/27".
+    public static func seasonLabel(start: Int) -> String {
+        String(format: "%d/%02d", start, (start + 1) % 100)
+    }
+
+    /// The year a season label starts with: "2026/27" or "2026-2027" → 2026. Nil when it doesn't start with a year.
+    public static func seasonStart(label: String) -> Int? {
+        let digits = label.trimmingCharacters(in: .whitespaces).prefix(4)
+        guard digits.count == 4, digits.allSatisfy(\.isNumber), let year = Int(digits), (2000...2100).contains(year) else { return nil }
+        return year
+    }
+
+    /// The season this profile is set to, as the year it starts; the season of `now` if the label isn't a year.
+    public func currentSeason(now: Date = Date()) -> Int {
+        AthleteProfile.seasonStart(label: season) ?? AthleteProfile.seasonStart(for: now)
     }
 }
 
@@ -69,8 +89,12 @@ public struct AppData: Codable, Equatable, Sendable {
     public var sessions: [TrainingSession]
     public var combineResults: [CombineResult]
     public var events: [SeasonEvent]
+    /// Every season's expenses; each one says which season it counts toward.
     public var expenses: [Expense]
-    public var seasonBudget: Double
+    /// The overall budget for each season that has one.
+    public var seasonBudgets: [SeasonBudget]
+    /// What's set aside for each program, per season.
+    public var programBudgets: [ProgramBudget]
     public var docs: [MentalDoc]
     /// Height and weight checks. They belong to the athlete, so a blank season keeps them.
     public var bodyMeasurements: [BodyMeasurement]
@@ -80,7 +104,8 @@ public struct AppData: Codable, Equatable, Sendable {
     public var themeID: String
 
     public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [],
-                wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID) {
+                wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID,
+                seasonBudgets: [SeasonBudget] = [], programBudgets: [ProgramBudget] = []) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -89,16 +114,25 @@ public struct AppData: Codable, Equatable, Sendable {
         self.combineResults = combineResults
         self.events = events
         self.expenses = expenses
-        self.seasonBudget = seasonBudget
+        self.seasonBudgets = seasonBudgets
+        self.programBudgets = programBudgets
         self.docs = docs
         self.bodyMeasurements = bodyMeasurements
         self.wallballDrills = wallballDrills
         self.wallballSessions = wallballSessions
         self.themeID = themeID
+        // `seasonBudget` is the current season's overall budget.
+        if seasonBudget > 0 { self.seasonBudget = seasonBudget }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, bodyMeasurements, wallballDrills, wallballSessions, themeID
+        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudgets, programBudgets, docs, bodyMeasurements,
+             wallballDrills, wallballSessions, themeID
+    }
+
+    /// Files saved before budgets per season had one `seasonBudget` for the season the profile was set to.
+    private enum LegacyKeys: String, CodingKey {
+        case seasonBudget
     }
 
     /// Reads current files and version 1 season files, which had no `id`.
@@ -112,7 +146,13 @@ public struct AppData: Codable, Equatable, Sendable {
         combineResults = try c.decodeIfPresent([CombineResult].self, forKey: .combineResults) ?? []
         events = try c.decodeIfPresent([SeasonEvent].self, forKey: .events) ?? []
         expenses = try c.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
-        seasonBudget = try c.decodeIfPresent(Double.self, forKey: .seasonBudget) ?? 0
+        programBudgets = try c.decodeIfPresent([ProgramBudget].self, forKey: .programBudgets) ?? []
+        if let budgets = try c.decodeIfPresent([SeasonBudget].self, forKey: .seasonBudgets) {
+            seasonBudgets = budgets
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self).decodeIfPresent(Double.self, forKey: .seasonBudget) ?? 0
+            seasonBudgets = legacy > 0 ? [SeasonBudget(season: profile.currentSeason(), amount: legacy)] : []
+        }
         docs = try c.decodeIfPresent([MentalDoc].self, forKey: .docs) ?? []
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurement].self, forKey: .bodyMeasurements) ?? []
         wallballDrills = try c.decodeIfPresent([WallballDrill].self, forKey: .wallballDrills) ?? []
@@ -168,11 +208,11 @@ public struct AppData: Codable, Equatable, Sendable {
         return counts
     }
 
-    /// A clean season for the same athlete: keeps the profile, programs, budget, height and weight history, wall ball drills
-    /// and theme, drops the season's logged data.
+    /// A clean season for the same athlete: keeps the profile, programs, budgets and expenses (each belongs to a season),
+    /// height and weight history, wall ball drills and theme, drops the season's logged data.
     public func blankSeason() -> AppData {
-        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, bodyMeasurements: bodyMeasurements,
-                wallballDrills: wallballDrills, themeID: themeID)
+        AppData(id: id, profile: profile, programs: programs, expenses: expenses, bodyMeasurements: bodyMeasurements,
+                wallballDrills: wallballDrills, themeID: themeID, seasonBudgets: seasonBudgets, programBudgets: programBudgets)
     }
 
     public static let encoder: JSONEncoder = {
