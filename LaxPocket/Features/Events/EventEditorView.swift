@@ -72,6 +72,11 @@ struct EventEditorView: View {
     }
 
     private var isNew: Bool { !store.data.events.contains { $0.id == original.id } }
+    /// Says that the trip to this event moves with its dates.
+    private var tripNote: String {
+        guard let trip = store.data.trip(forEvent: original.id) else { return "" }
+        return " The \(trip.name.isEmpty ? "trip" : trip.name) trip moves with these dates."
+    }
     private var canScore: Bool { kind == .game || kind == .tournament }
     private var athlete: String {
         let name = store.profile.firstName.trimmingCharacters(in: .whitespaces)
@@ -117,7 +122,8 @@ struct EventEditorView: View {
                     onDelete()
                 }
             } message: {
-                Text("Removes the event with its result, goals, reflection, videos and checklist.")
+                Text("Removes the event with its result, goals, reflection, videos and checklist."
+                     + (store.data.trip(forEvent: original.id) != nil ? " Its trip and costs stay in the Budget." : ""))
             }
         }
     }
@@ -161,7 +167,11 @@ struct EventEditorView: View {
         } header: {
             Text("When")
         } footer: {
-            if dateIsTentative { Text("Only the month is shown, marked “TBC”.") }
+            if dateIsTentative {
+                Text("Only the month is shown, marked “TBC”.\(tripNote)")
+            } else if !tripNote.isEmpty {
+                Text(tripNote.trimmingCharacters(in: .whitespaces))
+            }
         }
     }
 

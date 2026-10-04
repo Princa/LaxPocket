@@ -259,6 +259,47 @@ extension AppData {
     public func expenses(forTrip id: UUID) -> [Expense] {
         expenses.filter { $0.tripID == id }
     }
+
+    /// The trip to an event, if there is one. An event has at most one trip; if two point at it, the earlier one.
+    public func trip(forEvent id: UUID) -> Trip? {
+        trips.filter { $0.eventID == id }.min { ($0.departureDate, $0.id.uuidString) < ($1.departureDate, $1.id.uuidString) }
+    }
+
+    /// The event a trip is for, if it's still on the Events tab.
+    public func event(forTrip trip: Trip) -> SeasonEvent? {
+        trip.eventID.flatMap { id in events.first { $0.id == id } }
+    }
+
+    /// Keeps a trip with its event when the event changes. The trip's dates move by as many days as the event's start
+    /// and end did, so a travel day before or after the event is kept, and the hotel dates move with them. A name or
+    /// destination still the same as the event's follows the event's new title or place.
+    public mutating func moveTrips(from old: SeasonEvent, to new: SeasonEvent, calendar: Calendar = .laxWeek) {
+        func days(_ from: Date, _ to: Date) -> Int {
+            calendar.dateComponents([.day], from: calendar.startOfDay(for: from), to: calendar.startOfDay(for: to)).day ?? 0
+        }
+        func shifted(_ date: Date, by days: Int) -> Date {
+            days == 0 ? date : (calendar.date(byAdding: .day, value: days, to: date) ?? date)
+        }
+        let startDelta = days(old.date, new.date)
+        let endDelta = days(old.endDate ?? old.date, new.endDate ?? new.date)
+        for index in trips.indices where trips[index].eventID == new.id {
+            var trip = trips[index]
+            let oldDeparture = trip.departureDate
+            trip.departureDate = shifted(trip.departureDate, by: startDelta)
+            trip.returnDate = max(shifted(trip.returnDate, by: endDelta), trip.departureDate)
+            if let checkIn = trip.hotelCheckIn { trip.hotelCheckIn = shifted(checkIn, by: startDelta) }
+            if let checkOut = trip.hotelCheckOut { trip.hotelCheckOut = max(shifted(checkOut, by: endDelta), trip.hotelCheckIn ?? checkOut) }
+            if trip.season == AthleteProfile.seasonStart(for: oldDeparture, calendar: calendar) {
+                trip.season = AthleteProfile.seasonStart(for: trip.departureDate, calendar: calendar)
+            }
+            if trip.name == old.title, !new.title.isEmpty { trip.name = new.title }
+            if trip.destination == old.location, new.location != old.location {
+                trip.destination = new.location
+                if let country = TripCountry.guess(from: new.location) { trip.country = country }
+            }
+            trips[index] = trip
+        }
+    }
 }
 
 public enum TripMath {

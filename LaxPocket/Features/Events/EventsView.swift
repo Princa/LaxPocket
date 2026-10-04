@@ -49,8 +49,7 @@ struct EventsView: View {
                     SectionHeader(title: "Upcoming").padding(.top, 8)
                     Card(padding: 0) {
                         ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, event in
-                            Button { editing = event } label: { upcomingRow(event).padding(.horizontal, 14) }
-                                .buttonStyle(.plain)
+                            eventRow(event)
                             if index < upcoming.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
@@ -63,8 +62,7 @@ struct EventsView: View {
                     .padding(.top, 8)
                     Card(padding: 0) {
                         ForEach(Array(past.enumerated()), id: \.element.id) { index, event in
-                            Button { editing = event } label: { upcomingRow(event).padding(.horizontal, 14) }
-                                .buttonStyle(.plain)
+                            eventRow(event)
                             if index < past.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
@@ -142,7 +140,19 @@ struct EventsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func upcomingRow(_ event: SeasonEvent) -> some View {
+    /// A game opens the editor to add its result. A tournament, showcase or camp opens its page, with its trip.
+    @ViewBuilder
+    private func eventRow(_ event: SeasonEvent) -> some View {
+        if event.kind == .game {
+            Button { editing = event } label: { upcomingRow(event).padding(.horizontal, 14) }
+                .buttonStyle(.plain)
+        } else {
+            NavigationLink { GameDetailView(eventID: event.id) } label: { upcomingRow(event, showsChevron: true).padding(.horizontal, 14) }
+                .buttonStyle(.plain)
+        }
+    }
+
+    private func upcomingRow(_ event: SeasonEvent, showsChevron: Bool = false) -> some View {
         let isShowcase = event.kind == .showcase
         return HStack(spacing: 12) {
             DateBadge(top: Formatters.monthShort(event.date),
@@ -153,10 +163,19 @@ struct EventsView: View {
                 Text(event.opponent.map { "\(event.team) vs \($0)" } ?? event.title)
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
                 Text(detail(for: event)).font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                if let trip = store.data.trip(forEvent: event.id) {
+                    Pill(text: "Trip · \(store.money(TripMath.summary(trip, in: store.data).spent))", background: theme.primaryTint,
+                         foreground: theme.primary, systemImage: "suitcase.fill")
+                        .padding(.top, 2)
+                }
             }
             Spacer()
+            if showsChevron {
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron)
+            }
         }
         .padding(.vertical, 12)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 

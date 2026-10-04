@@ -175,6 +175,101 @@ final class TripTests: XCTestCase {
         XCTAssertEqual(blank.trips[0].hotelName, "Harbour Inn")
     }
 
+    // MARK: - Trip and event together
+
+    private func tournament(_ from: Date, _ to: Date, title: String = "Fall Brawl", location: String = "Baltimore, MD") -> SeasonEvent {
+        SeasonEvent(kind: .tournament, title: title, team: "Club 2031", date: from, endDate: to, location: location)
+    }
+
+    func testAnEventAndItsTrip() {
+        var data = Fixtures.season()
+        let showcase = data.events[1]
+        XCTAssertEqual(data.trip(forEvent: showcase.id)?.name, "Fall showcase")
+        XCTAssertEqual(data.event(forTrip: data.trips[0])?.id, showcase.id)
+        XCTAssertNil(data.trip(forEvent: data.events[0].id), "the game has no trip")
+
+        data.events.removeAll { $0.id == showcase.id }
+        XCTAssertNil(data.event(forTrip: data.trips[0]), "a deleted event isn't found")
+    }
+
+    func testTripMovesWithItsEvent() throws {
+        var data = Fixtures.season()
+        let old = tournament(date(2026, 10, 16, hour: 8), date(2026, 10, 18, hour: 17))
+        data.events.append(old)
+        // Leave the day before, back the day after; hotel for the three tournament nights.
+        var t = Trip(event: old)
+        t.departureDate = date(2026, 10, 15, hour: 7)
+        t.returnDate = date(2026, 10, 19, hour: 20)
+        t.hotelCheckIn = date(2026, 10, 15, hour: 15)
+        t.hotelCheckOut = date(2026, 10, 18, hour: 11)
+        t.travelDetails = "Carpool"
+        data.trips.append(t)
+        let unrelated = Trip(name: "Other", departureDate: date(2026, 10, 15), returnDate: date(2026, 10, 16))
+        data.trips.append(unrelated)
+
+        // The tournament moves a week later and gains a day.
+        var new = old
+        new.date = date(2026, 10, 23, hour: 8)
+        new.endDate = date(2026, 10, 26, hour: 17)
+        data.moveTrips(from: old, to: new, calendar: calendar)
+
+        let moved = try XCTUnwrap(data.trip(forEvent: old.id))
+        XCTAssertEqual(moved.departureDate, date(2026, 10, 22, hour: 7), "the travel day before is kept")
+        XCTAssertEqual(moved.returnDate, date(2026, 10, 27, hour: 20), "and the travel day after")
+        XCTAssertEqual(moved.hotelCheckIn, date(2026, 10, 22, hour: 15))
+        XCTAssertEqual(moved.hotelCheckOut, date(2026, 10, 26, hour: 11))
+        XCTAssertEqual(moved.travelDetails, "Carpool")
+        XCTAssertEqual(data.trips.first { $0.id == unrelated.id }, unrelated, "trips to other events don't move")
+    }
+
+    func testTripFollowsTheEventsNameAndPlace() {
+        var data = Fixtures.season()
+        let old = tournament(date(2026, 10, 16), date(2026, 10, 18))
+        data.events.append(old)
+        data.trips.append(Trip(event: old))
+        var named = Trip(event: old)
+        named.name = "Brawl weekend"
+        named.destination = "Towson, MD"
+        data.trips.append(named)
+
+        var new = old
+        new.title = "Fall Brawl 2026"
+        new.location = "Oakville, ON"
+        data.moveTrips(from: old, to: new, calendar: calendar)
+
+        let follows = data.trips[data.trips.count - 2]
+        XCTAssertEqual(follows.name, "Fall Brawl 2026")
+        XCTAssertEqual(follows.destination, "Oakville, ON")
+        XCTAssertEqual(follows.country, .canada, "the country follows the new place")
+        XCTAssertEqual(follows.departureDate, old.date, "dates that didn't change stay")
+        let ownName = data.trips[data.trips.count - 1]
+        XCTAssertEqual(ownName.name, "Brawl weekend", "a name typed for the trip is kept")
+        XCTAssertEqual(ownName.destination, "Towson, MD")
+        XCTAssertEqual(ownName.country, .unitedStates)
+    }
+
+    func testTripMovesIntoTheEventsNewSeason() {
+        var data = Fixtures.season()
+        let old = tournament(date(2026, 7, 24), date(2026, 7, 26))
+        data.events.append(old)
+        data.trips.append(Trip(event: old))
+        XCTAssertEqual(data.trips.last?.season, 2025)
+        var new = old
+        new.date = date(2026, 8, 7)
+        new.endDate = date(2026, 8, 9)
+        data.moveTrips(from: old, to: new, calendar: calendar)
+        XCTAssertEqual(data.trips.last?.season, 2026, "a season that followed the date keeps following it")
+
+        var picked = Trip(event: new)
+        picked.season = 2027
+        data.trips = [picked]
+        var later = new
+        later.date = date(2026, 8, 14)
+        later.endDate = date(2026, 8, 16)
+        data.moveTrips(from: new, to: later, calendar: calendar)
+        XCTAssertEqual(data.trips[0].season, 2027, "a season picked by hand stays")
+    }
+
     // MARK: - Cloud rows
 
     func testTripRowsRoundTrip() {
