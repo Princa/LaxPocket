@@ -26,22 +26,28 @@ Built with SwiftUI for iOS 17+.
 
 ## Getting started
 
-You need a Mac with **Xcode 16** and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+You need a Mac with **Xcode 16** and [Homebrew](https://brew.sh).
 
 ```bash
-brew install xcodegen
 git clone https://github.com/Princa/LaxPocket.git
 cd LaxPocket
-xcodegen generate
+scripts/setup-mac.sh
 open LaxPocket.xcodeproj
 ```
 
-Choose your team under **Signing & Capabilities**, pick your iPhone or a simulator, and press **Run**. On first launch the app asks you to create an athlete profile, then walks you through adding the programs they train with.
+Pick your iPhone or a simulator and press **Run**. On first launch the app asks you to create an athlete profile, then walks you through adding the programs they train with.
+
+`scripts/setup-mac.sh` is a one-time step. It installs [XcodeGen](https://github.com/yonaskolb/XcodeGen) if needed, generates the Xcode project from `project.yml`, saves your signing team in `Config/Local.xcconfig` (not committed; it reads the team from your Apple Development certificate, or pass it: `scripts/setup-mac.sh ABCDE12345`), and turns on git hooks that regenerate the project after every pull, checkout or rebase. After that:
+
+- **Pulling changes:** `git pull`, then build. The project updates itself and keeps your signing team; if Xcode asks, choose **Revert** to reload it.
+- **Making changes here and pushing:** edit in Xcode or run Claude Code in this folder, then commit and push. After adding or removing files, run `scripts/xcodegen-if-needed.sh` (Claude Code does this itself; see `CLAUDE.md`).
 
 ## Project layout
 
 ```
 project.yml               XcodeGen spec (the .xcodeproj is generated, not committed)
+Config/                   signing: Signing.xcconfig includes your Local.xcconfig (team ID, not committed)
+.githooks/                regenerate the Xcode project after pull / checkout / rebase (scripts/setup-mac.sh turns them on)
 Core/                     LaxPocketCore Swift package: models and logic, no UI
   Sources/LaxPocketCore/
     Benchmarks.swift      NDTP tier cut-offs, tier + gap calculations

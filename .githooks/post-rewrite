@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Keeps the generated Xcode project in step after a pull, checkout or rebase. Installed by scripts/setup-mac.sh.
+exec "$(git rev-parse --show-toplevel)/scripts/xcodegen-if-needed.sh"
