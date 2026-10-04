@@ -11,9 +11,11 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var season: String
     /// How height and weight are shown and typed in.
     public var bodyUnits: BodyUnits
+    /// Canadian dollars per US dollar, for expenses paid in US dollars and for showing the budget in US dollars.
+    public var usdToCAD: Double
 
     public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
-                bodyUnits: BodyUnits = .imperial) {
+                bodyUnits: BodyUnits = .imperial, usdToCAD: Double = ExchangeRate.defaultUSDToCAD) {
         self.firstName = firstName
         self.classYear = classYear
         self.positions = positions
@@ -22,13 +24,15 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         self.weeklyGoalHours = weeklyGoalHours
         self.season = season
         self.bodyUnits = bodyUnits
+        self.usdToCAD = usdToCAD
     }
 
     private enum CodingKeys: String, CodingKey {
-        case firstName, classYear, positions, benchmarkGroup, mentalCoachName, weeklyGoalHours, season, bodyUnits
+        case firstName, classYear, positions, benchmarkGroup, mentalCoachName, weeklyGoalHours, season, bodyUnits, usdToCAD
     }
 
-    /// Profiles saved before height and weight tracking have no `bodyUnits`.
+    /// Profiles saved before height and weight tracking have no `bodyUnits`, and those saved before currencies have no
+    /// `usdToCAD`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         firstName = try c.decode(String.self, forKey: .firstName)
@@ -39,6 +43,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
         season = try c.decode(String.self, forKey: .season)
         bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
+        usdToCAD = try c.decodeIfPresent(Double.self, forKey: .usdToCAD) ?? ExchangeRate.defaultUSDToCAD
     }
 
     /// "Olivia's Season" style title.

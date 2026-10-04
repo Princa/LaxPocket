@@ -29,15 +29,15 @@ struct ProgramBudgetView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("\(AthleteProfile.seasonLabel(start: season)) season").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(Formatters.money(spent)).font(.display(44)).foregroundStyle(theme.primary)
-                            Text(budget > 0 ? "of \(Formatters.money(budget))" : (program == nil ? "spent" : "spent · no budget set"))
+                            Text(store.money(spent)).font(.display(44)).foregroundStyle(theme.primary)
+                            Text(budget > 0 ? "of \(store.money(budget))" : (program == nil ? "spent" : "spent · no budget set"))
                                 .font(.system(size: 14)).foregroundStyle(AppTheme.caption)
                         }
                         if budget > 0 {
                             ProgressView(value: min(spent / budget, 1))
                                 .tint(spent > budget ? theme.accentText : theme.primary)
                                 .scaleEffect(x: 1, y: 2, anchor: .center)
-                            Text(spent > budget ? "\(Formatters.money(spent - budget)) over budget" : "\(Formatters.money(budget - spent)) left")
+                            Text(spent > budget ? "\(store.money(spent - budget)) over budget" : "\(store.money(budget - spent)) left")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(spent > budget ? theme.accentText : AppTheme.ink2)
                         }
@@ -132,7 +132,7 @@ struct ProgramBudgetView: View {
                 Text(AthleteProfile.seasonLabel(start: s)).font(.system(size: 15, weight: s == season ? .bold : .regular))
                 if s == season { Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(theme.primary) }
                 Spacer()
-                Text(budget > 0 ? "\(Formatters.money(spent)) of \(Formatters.money(budget))" : Formatters.money(spent))
+                Text(budget > 0 ? "\(store.money(spent)) of \(store.money(budget))" : store.money(spent))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(budget > 0 && spent > budget ? theme.accentText : AppTheme.ink2)
             }

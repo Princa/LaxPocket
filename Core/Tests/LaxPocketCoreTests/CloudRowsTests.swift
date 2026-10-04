@@ -234,8 +234,9 @@ final class CloudRowsTests: XCTestCase {
         try check(game.videos[0])
         try check(try XCTUnwrap(snapshot.events.first { !$0.checklist.isEmpty }).checklist[0])
         try check(snapshot.expenses[0])
-        XCTAssertEqual(try keys(snapshot.expenses[0]), Set(ExpenseRow.columns).subtracting(["trip_id"]))
-        XCTAssertEqual(try keys(snapshot.expenses[1]), Set(ExpenseRow.columns).subtracting(["program_id", "trip_id"]), "no program writes a null link")
+        XCTAssertEqual(try keys(snapshot.expenses[0]), Set(ExpenseRow.columns).subtracting(["trip_id", "original_amount"]))
+        XCTAssertEqual(try keys(snapshot.expenses[1]), Set(ExpenseRow.columns).subtracting(["program_id", "trip_id", "original_amount"]),
+                       "no program writes a null link")
         try check(snapshot.trips[0])
         XCTAssertEqual(try keys(snapshot.trips[0]), Set(TripRow.columns).subtracting(["hotel_check_out"]))
         try check(snapshot.seasonBudgets[0])

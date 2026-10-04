@@ -46,8 +46,13 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
     public var date: Date
     public var title: String
     public var category: ExpenseCategory
-    /// Amount in the season's currency (CAD by default).
+    /// Amount in Canadian dollars; what counts toward budgets and totals. For an expense paid in another currency, the
+    /// amount paid converted at the exchange rate.
     public var amount: Double
+    /// What it was paid in.
+    public var currency: Currency
+    /// What was paid, in `currency`, when that isn't CAD.
+    public var originalAmount: Double?
     public var note: String
     /// The program it was for, if any.
     public var programID: String?
@@ -58,12 +63,14 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
     public var tripID: UUID?
 
     public init(id: UUID = UUID(), date: Date, title: String, category: ExpenseCategory, amount: Double, note: String = "",
-                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil) {
+                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil, currency: Currency = .cad, originalAmount: Double? = nil) {
         self.id = id
         self.date = date
         self.title = title
         self.category = category
         self.amount = amount
+        self.currency = originalAmount == nil ? .cad : currency
+        self.originalAmount = currency == .cad ? nil : originalAmount
         self.note = note
         self.programID = programID
         self.season = season ?? AthleteProfile.seasonStart(for: date)
@@ -71,11 +78,11 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, date, title, category, amount, note, programID, season, tripID
+        case id, date, title, category, amount, note, programID, season, tripID, currency, originalAmount
     }
 
     /// Expenses saved before seasons and programs have neither; they count toward the season of their date. Those saved
-    /// before trips have no `tripID`.
+    /// before trips have no `tripID`, and those saved before currencies were paid in CAD.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -83,6 +90,10 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
         title = try c.decode(String.self, forKey: .title)
         category = try c.decode(ExpenseCategory.self, forKey: .category)
         amount = try c.decode(Double.self, forKey: .amount)
+        originalAmount = try c.decodeIfPresent(Double.self, forKey: .originalAmount)
+        let currency = try c.decodeIfPresent(Currency.self, forKey: .currency) ?? .cad
+        self.currency = originalAmount == nil ? .cad : currency
+        if self.currency == .cad { originalAmount = nil }
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
         programID = try c.decodeIfPresent(String.self, forKey: .programID)
         season = try c.decodeIfPresent(Int.self, forKey: .season) ?? AthleteProfile.seasonStart(for: date)

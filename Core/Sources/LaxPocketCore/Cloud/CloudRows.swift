@@ -18,7 +18,7 @@ public protocol CloudRow: Codable, Hashable, Sendable {
 public struct ProfileRow: CloudRow {
     public static let table = "profiles"
     public static let columns = ["id", "first_name", "class_year", "positions", "benchmark_group", "mental_coach_name",
-                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units"]
+                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units", "usd_to_cad"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -32,17 +32,19 @@ public struct ProfileRow: CloudRow {
     public var seasonBudget: Double
     public var themeID: String
     public var bodyUnits: BodyUnits
+    public var usdToCAD: Double
 
     enum CodingKeys: String, CodingKey {
         case id, positions
         case firstName = "first_name", classYear = "class_year", benchmarkGroup = "benchmark_group"
         case mentalCoachName = "mental_coach_name", weeklyGoalHours = "weekly_goal_hours", seasonLabel = "season_label"
-        case seasonBudget = "season_budget", themeID = "theme_id", bodyUnits = "body_units"
+        case seasonBudget = "season_budget", themeID = "theme_id", bodyUnits = "body_units", usdToCAD = "usd_to_cad"
     }
 }
 
 extension ProfileRow {
-    /// Sync records saved before height and weight tracking have no `body_units`.
+    /// Sync records saved before height and weight tracking have no `body_units`, and those saved before currencies
+    /// have no `usd_to_cad`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -56,6 +58,7 @@ extension ProfileRow {
         seasonBudget = try c.decode(Double.self, forKey: .seasonBudget)
         themeID = try c.decode(String.self, forKey: .themeID)
         bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
+        usdToCAD = try c.decodeIfPresent(Double.self, forKey: .usdToCAD) ?? ExchangeRate.defaultUSDToCAD
     }
 }
 
@@ -263,7 +266,8 @@ public struct ChecklistItemRow: CloudRow {
 
 public struct ExpenseRow: CloudRow {
     public static let table = "expenses"
-    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note", "program_id", "season", "trip_id"]
+    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note", "program_id", "season", "trip_id",
+                                 "currency", "original_amount"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -276,16 +280,18 @@ public struct ExpenseRow: CloudRow {
     public var programID: String?
     public var season: Int
     public var tripID: UUID?
+    public var currency: Currency
+    public var originalAmount: Double?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, category, amount, note, season
-        case profileID = "profile_id", spentAt = "spent_at", programID = "program_id", tripID = "trip_id"
+        case id, title, category, amount, note, season, currency
+        case profileID = "profile_id", spentAt = "spent_at", programID = "program_id", tripID = "trip_id", originalAmount = "original_amount"
     }
 }
 
 extension ExpenseRow {
     public init(id: UUID, profileID: UUID, spentAt: Timestamp, title: String, category: ExpenseCategory, amount: Double, note: String,
-                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil) {
+                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil, currency: Currency = .cad, originalAmount: Double? = nil) {
         self.id = id
         self.profileID = profileID
         self.spentAt = spentAt
@@ -296,10 +302,13 @@ extension ExpenseRow {
         self.programID = programID
         self.season = season ?? AthleteProfile.seasonStart(for: spentAt.date)
         self.tripID = tripID
+        self.currency = currency
+        self.originalAmount = originalAmount
     }
 
     /// Rows written before expenses had seasons (by an older build, or saved in a sync record) have no season; they
-    /// count toward the season of `spent_at`, the same as on the phone. Rows from before trips have no `trip_id`.
+    /// count toward the season of `spent_at`, the same as on the phone. Rows from before trips have no `trip_id`, and rows from
+    /// before currencies have no `currency` (they're CAD).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -312,6 +321,8 @@ extension ExpenseRow {
         programID = try c.decodeIfPresent(String.self, forKey: .programID)
         season = try c.decodeIfPresent(Int.self, forKey: .season) ?? AthleteProfile.seasonStart(for: spentAt.date)
         tripID = try c.decodeIfPresent(UUID.self, forKey: .tripID)
+        currency = try c.decodeIfPresent(Currency.self, forKey: .currency) ?? .cad
+        originalAmount = try c.decodeIfPresent(Double.self, forKey: .originalAmount)
     }
 }
 
@@ -602,6 +613,7 @@ extension ProfileRow {
         seasonBudget = roundedTo(2, data.seasonBudget)
         themeID = data.themeID
         bodyUnits = p.bodyUnits
+        usdToCAD = ExchangeRate.normalized(p.usdToCAD)
     }
 }
 
@@ -711,10 +723,13 @@ extension ProfileSnapshot {
         }
         let tripIDs = Set(data.trips.map(\.id))
         expenses = data.expenses.map { x in
-            // A link to a program or trip that's gone would fail the foreign key, so it's dropped.
-            ExpenseRow(id: x.id, profileID: pid, spentAt: Timestamp(x.date), title: x.title, category: x.category,
-                       amount: roundedTo(2, x.amount), note: x.note, programID: x.programID.flatMap { programIDs.contains($0) ? $0 : nil },
-                       season: validSeason(x.season), tripID: x.tripID.flatMap { tripIDs.contains($0) ? $0 : nil })
+            // A link to a program or trip that's gone would fail the foreign key, so it's dropped. An amount paid in
+            // another currency that rounds to nothing is stored as CAD.
+            let original = x.currency == .cad ? nil : x.originalAmount.map { roundedTo(2, $0) }.flatMap { $0 > 0 ? $0 : nil }
+            return ExpenseRow(id: x.id, profileID: pid, spentAt: Timestamp(x.date), title: x.title, category: x.category,
+                              amount: roundedTo(2, x.amount), note: x.note, programID: x.programID.flatMap { programIDs.contains($0) ? $0 : nil },
+                              season: validSeason(x.season), tripID: x.tripID.flatMap { tripIDs.contains($0) ? $0 : nil },
+                              currency: original == nil ? .cad : x.currency, originalAmount: original)
         }
         seasonBudgets = data.seasonBudgets.compactMap { b in
             guard let season = validSeason(b.season), roundedTo(2, b.amount) > 0 else { return nil }
@@ -740,7 +755,7 @@ extension ProfileSnapshot {
         let p = profile
         let athlete = AthleteProfile(firstName: p.firstName, classYear: p.classYear, positions: p.positions, benchmarkGroup: p.benchmarkGroup,
                                      mentalCoachName: p.mentalCoachName, weeklyGoalHours: p.weeklyGoalHours, season: p.seasonLabel,
-                                     bodyUnits: p.bodyUnits)
+                                     bodyUnits: p.bodyUnits, usdToCAD: p.usdToCAD)
         return AppData(
             id: p.id,
             profile: athlete,
@@ -760,7 +775,7 @@ extension ProfileSnapshot {
             events: events.sorted { $0.event.startsAt < $1.event.startsAt }.map(\.seasonEvent),
             expenses: expenses.sorted { $0.spentAt < $1.spentAt }.map { r in
                 Expense(id: r.id, date: r.spentAt.date, title: r.title, category: r.category, amount: r.amount, note: r.note,
-                        programID: r.programID, season: r.season, tripID: r.tripID)
+                        programID: r.programID, season: r.season, tripID: r.tripID, currency: r.currency, originalAmount: r.originalAmount)
             },
             docs: docs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.compactMap { r in
                 URL(string: r.url).map {

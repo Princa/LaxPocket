@@ -111,6 +111,10 @@ final class CloudSyncIntegrationTests: XCTestCase {
         tabletData.expenses.append(Expense(date: Fixtures.day(6), title: "Club jacket", category: .equipment, amount: 95, programID: "club", season: 2027))
         tabletData.expenses.append(Expense(date: Fixtures.day(60), title: "Team dinner", category: .food, amount: 64.25,
                                            tripID: season.trips[0].id))
+        var hotel = Expense(date: Fixtures.day(61), title: "Hotel", category: .lodging, amount: 0, tripID: season.trips[0].id)
+        hotel.setPaid(410.5, in: .usd, rate: 1.3725)
+        tabletData.expenses.append(hotel)
+        tabletData.profile.usdToCAD = 1.3725
 
         phoneBase = try await phone.sync(local: phoneData, base: phoneBase)
         tabletBase = try await tablet.sync(local: tabletData, base: tabletBase)
@@ -124,14 +128,18 @@ final class CloudSyncIntegrationTests: XCTestCase {
         let final = cloud.appData
         XCTAssertEqual(final.sessions.first { $0.id == season.sessions[0].id }?.minutes, 75)
         XCTAssertEqual(final.sessions.first { $0.id == season.sessions[2].id }?.notes, "From the tablet")
-        XCTAssertEqual(final.expenses.count, 3)
+        XCTAssertEqual(final.expenses.count, 4)
+        let usHotel = try XCTUnwrap(final.expenses.first { $0.currency == .usd })
+        XCTAssertEqual(usHotel.paidAmount, 410.5)
+        XCTAssertEqual(usHotel.amount, 563.41)
+        XCTAssertEqual(final.profile.usdToCAD, 1.3725)
         XCTAssertEqual(final.expenses.first { $0.programID == "club" && $0.season == 2026 }?.note, "Paid by e-transfer")
         XCTAssertEqual(final.expenses.first { $0.category == .food }?.tripID, season.trips[0].id)
         XCTAssertEqual(final.trips.map(\.name), ["Fall showcase", "Spring tournament"])
         XCTAssertEqual(final.trips[0].hotelName, "Lakeside Hotel")
         XCTAssertEqual(final.trips[0].eventID, season.events[1].id)
         XCTAssertEqual(final.trips[1].travelMode, .fly)
-        XCTAssertEqual(TripMath.summary(final.trips[0], in: final).spent, 64.25)
+        XCTAssertEqual(TripMath.summary(final.trips[0], in: final).spent, 64.25 + 563.41)
         XCTAssertEqual(final.expenses.first { $0.season == 2027 }?.title, "Club jacket")
         XCTAssertEqual(final.budget(for: 2026), 15_000)
         XCTAssertEqual(final.programBudgets.map(\.amount), [3500, 3200])
