@@ -1,12 +1,14 @@
 import SwiftUI
 import LaxPocketCore
 
-/// An expense to add or edit in the editor sheet. New ones can start with a program and season filled in.
+/// An expense to add or edit in the editor sheet. New ones can start with a program, season, trip and category filled in.
 struct ExpenseEditTarget: Identifiable {
     let id = UUID()
     var expense: Expense?
     var programID: String?
     var season: Int
+    var tripID: UUID?
+    var category: ExpenseCategory?
 }
 
 /// Money typed into a text field: "1,850", "$320.50" or "320.5".
@@ -27,6 +29,8 @@ struct ExpenseListRow: View {
     let expense: Expense
     /// Leave the program out on a screen that's already about one program.
     var showsProgram = true
+    /// Leave the trip out on a screen that's already about one trip.
+    var showsTrip = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -57,8 +61,10 @@ struct ExpenseListRow: View {
     }
 
     private var caption: String {
-        guard showsProgram, let id = expense.programID, let program = store.program(id) else { return expense.category.title }
-        return "\(expense.category.title) · \(program.name)"
+        var parts = [expense.category.title]
+        if showsProgram, let id = expense.programID, let program = store.program(id) { parts.append(program.name) }
+        if showsTrip, let id = expense.tripID, let trip = store.trip(id) { parts.append(trip.name) }
+        return parts.joined(separator: " · ")
     }
 }
 

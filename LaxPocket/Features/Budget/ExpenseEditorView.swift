@@ -1,7 +1,7 @@
 import SwiftUI
 import LaxPocketCore
 
-/// Adds an expense, or edits one: what it was, the amount, the program and season it counts toward, and notes.
+/// Adds an expense, or edits one: what it was, the amount, the program, season and trip it counts toward, and notes.
 struct ExpenseEditorView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -13,25 +13,36 @@ struct ExpenseEditorView: View {
     @State private var date: Date
     @State private var season: Int
     @State private var programID: String?
+    @State private var tripID: UUID?
     @State private var note: String
     @State private var confirmDelete = false
+    /// A category handed in (from a trip's "Add hotel", say) isn't replaced by the program's usual one.
+    private let keepsCategory: Bool
 
-    /// A new expense can start with a program and season filled in.
-    init(expense: Expense? = nil, programID: String? = nil, season: Int? = nil) {
+    /// A new expense can start with a program, season, trip and category filled in.
+    init(expense: Expense? = nil, programID: String? = nil, season: Int? = nil, tripID: UUID? = nil, category: ExpenseCategory? = nil) {
         self.expense = expense
         let date = expense?.date ?? Date()
         _title = State(initialValue: expense?.title ?? "")
         _amountText = State(initialValue: expense.map { AmountText.string($0.amount) } ?? "")
-        _category = State(initialValue: expense?.category ?? .coaching)
+        _category = State(initialValue: expense?.category ?? category ?? (tripID != nil ? .tournamentFees : .coaching))
         _date = State(initialValue: date)
         _season = State(initialValue: expense?.season ?? season ?? AthleteProfile.seasonStart(for: date))
         _programID = State(initialValue: expense?.programID ?? programID)
+        _tripID = State(initialValue: expense?.tripID ?? tripID)
         _note = State(initialValue: expense?.note ?? "")
+        keepsCategory = category != nil || tripID != nil
     }
 
     private var isNew: Bool { expense == nil }
     private var amount: Double? { AmountText.parse(amountText).flatMap { $0 >= 0 ? $0 : nil } }
     private var program: Program? { programID.flatMap(store.program) }
+    private var trip: Trip? { tripID.flatMap(store.trip) }
+
+    /// Trips in the chosen season, plus the one already picked.
+    private var tripChoices: [Trip] {
+        store.data.trips.filter { $0.season == season || $0.id == tripID }.sorted { $0.departureDate > $1.departureDate }
+    }
 
     /// Programs that run in the chosen season, plus the one already picked.
     private var programChoices: [Program] {
@@ -48,7 +59,7 @@ struct ExpenseEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("What was it? e.g. Spring season fee", text: $title)
+                    TextField(tripID == nil ? "What was it? e.g. Spring season fee" : "What was it? e.g. Hotel, 2 nights", text: $title)
                     TextField("Amount (CAD)", text: $amountText).keyboardType(.decimalPad)
                     Picker("Category", selection: $category) {
                         ForEach(ExpenseCategory.allCases) { Text($0.title).tag($0) }
@@ -64,6 +75,14 @@ struct ExpenseEditorView: View {
                         Text("None").tag(String?.none)
                         ForEach(programChoices) { program in
                             Text(program.name).tag(String?.some(program.id))
+                        }
+                    }
+                    if !tripChoices.isEmpty {
+                        Picker("Trip", selection: $tripID) {
+                            Text("None").tag(UUID?.none)
+                            ForEach(tripChoices) { trip in
+                                Text(trip.name.isEmpty ? "Trip" : trip.name).tag(UUID?.some(trip.id))
+                            }
                         }
                     }
                 } header: {
@@ -92,14 +111,20 @@ struct ExpenseEditorView: View {
                 }
             }
             .onAppear {
-                if isNew, let program { category = .suggested(for: program.group) }
+                if isNew, !keepsCategory, let program { category = .suggested(for: program.group) }
             }
             .onChange(of: date) { old, new in
                 // The season follows the date until it's picked by hand.
                 if season == AthleteProfile.seasonStart(for: old) { season = AthleteProfile.seasonStart(for: new) }
             }
             .onChange(of: programID) { _, _ in
-                if isNew, let program { category = .suggested(for: program.group) }
+                if isNew, !keepsCategory, tripID == nil, let program { category = .suggested(for: program.group) }
+            }
+            .onChange(of: tripID) { _, _ in
+                // A trip's costs count toward its season and, unless picked, its program.
+                guard isNew, let trip else { return }
+                season = trip.season
+                if programID == nil { programID = trip.programID.flatMap(store.program)?.id }
             }
             .confirmationDialog("Delete this expense?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
@@ -112,8 +137,9 @@ struct ExpenseEditorView: View {
 
     private var budgetFooter: String {
         let label = AthleteProfile.seasonLabel(start: season)
-        if let program { return "Counts toward \(program.name)’s \(label) budget and the \(label) season total." }
-        return "Counts toward the \(label) season total. Pick a program to track it against that program’s budget too."
+        let tripNote = trip.map { " Part of the \($0.name.isEmpty ? "trip" : $0.name) trip’s costs." } ?? ""
+        if let program { return "Counts toward \(program.name)’s \(label) budget and the \(label) season total.\(tripNote)" }
+        return "Counts toward the \(label) season total. Pick a program to track it against that program’s budget too.\(tripNote)"
     }
 
     private func save() {
@@ -121,7 +147,7 @@ struct ExpenseEditorView: View {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         store.saveExpense(Expense(id: expense?.id ?? UUID(), date: date, title: trimmed.isEmpty ? (program?.name ?? category.title) : trimmed,
                                   category: category, amount: amount, note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                  programID: program?.id, season: season))
+                                  programID: program?.id, season: season, tripID: trip?.id))
         dismiss()
     }
 }

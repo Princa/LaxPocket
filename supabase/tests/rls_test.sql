@@ -143,6 +143,47 @@ end
 $$;
 delete from public.expenses where id = '50000000-0000-4000-8000-000000000002';
 
+-- Tournament trips: a trip to a tournament with the club, and what it cost.
+insert into public.season_events (id, profile_id, kind, title, starts_at, ends_at, location)
+values ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'tournament', 'Fall Brawl',
+        '2026-10-16T12:00:00Z', '2026-10-18T20:00:00Z', 'Baltimore, MD');
+insert into public.trips (id, profile_id, name, destination, country, departs_at, returns_at, season, program_id, event_id, budget,
+                          travel_mode, hotel_name, hotel_confirmation)
+values ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Fall Brawl', 'Baltimore, MD', 'US',
+        '2026-10-15T12:00:00Z', '2026-10-18T22:00:00Z', 2026, 'club', '20000000-0000-4000-8000-000000000002', 2500, 'drive',
+        'Harbour Inn', 'ABC123');
+insert into public.expenses (id, profile_id, spent_at, title, category, amount, program_id, season, trip_id) values
+  ('50000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', '2026-09-10T12:00:00Z', 'Entry fee', 'tournamentFees', 400, 'club', 2026, '90000000-0000-4000-8000-000000000001'),
+  ('50000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000001', '2026-10-18T12:00:00Z', 'Hotel, 3 nights', 'lodging', 690, 'club', 2026, '90000000-0000-4000-8000-000000000001'),
+  ('50000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', '2026-10-17T12:00:00Z', 'Team dinner', 'food', 85.5, null, 2026, '90000000-0000-4000-8000-000000000001'),
+  ('50000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000001', '2026-10-15T12:00:00Z', 'Tolls', 'other', 22, null, 2026, '90000000-0000-4000-8000-000000000001');
+do $$
+begin
+  assert (select sum(amount) from public.expenses where trip_id = '90000000-0000-4000-8000-000000000001') = 1197.5, 'A sees what the trip cost';
+  assert (select hotel_check_in is null and travel_details = '' and note = '' from public.trips), 'trip details default to blank';
+end
+$$;
+
+-- Deleting the event keeps the trip; deleting the trip keeps its expenses. Both clear the link.
+delete from public.season_events where id = '20000000-0000-4000-8000-000000000002';
+do $$
+begin
+  assert (select event_id is null and program_id = 'club' from public.trips), 'a deleted event''s trip stays, without the link';
+end
+$$;
+insert into public.trips (id, profile_id, name, departs_at, returns_at, season)
+values ('90000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'Day trip', '2026-11-01T12:00:00Z', '2026-11-01T12:00:00Z', 2026);
+update public.expenses set trip_id = '90000000-0000-4000-8000-000000000002' where id = '50000000-0000-4000-8000-000000000006';
+delete from public.trips where id = '90000000-0000-4000-8000-000000000002';
+do $$
+begin
+  assert (select trip_id is null and amount = 22 from public.expenses where id = '50000000-0000-4000-8000-000000000006'),
+    'a deleted trip''s expenses stay, without the link';
+end
+$$;
+delete from public.expenses where id in ('50000000-0000-4000-8000-000000000003', '50000000-0000-4000-8000-000000000004',
+                                         '50000000-0000-4000-8000-000000000005', '50000000-0000-4000-8000-000000000006');
+
 -- Data checks.
 do $$
 declare failed boolean;
@@ -299,6 +340,54 @@ begin
   exception when foreign_key_violation then failed := true;
   end;
   assert failed, 'an expense''s program has to exist';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount) values ('10000000-0000-4000-8000-000000000001', now(), 'jewellery', 10);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'expense categories are checked';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount, trip_id)
+    values ('10000000-0000-4000-8000-000000000001', now(), 'food', 10, '90000000-0000-4000-8000-0000000000ff');
+  exception when foreign_key_violation then failed := true;
+  end;
+  assert failed, 'an expense''s trip has to exist';
+
+  failed := false;
+  begin
+    insert into public.trips (profile_id, name, departs_at, returns_at, season)
+    values ('10000000-0000-4000-8000-000000000001', 'Backwards', '2026-10-18T00:00:00Z', '2026-10-15T00:00:00Z', 2026);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'trips can''t end before they start';
+
+  failed := false;
+  begin
+    insert into public.trips (profile_id, name, departs_at, returns_at, season, hotel_check_in, hotel_check_out)
+    values ('10000000-0000-4000-8000-000000000001', 'Hotel', '2026-10-15T00:00:00Z', '2026-10-18T00:00:00Z', 2026,
+            '2026-10-17T00:00:00Z', '2026-10-16T00:00:00Z');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'hotel check-out is after check-in';
+
+  failed := false;
+  begin
+    insert into public.trips (profile_id, name, country, departs_at, returns_at, season)
+    values ('10000000-0000-4000-8000-000000000001', 'Away', 'Narnia', now(), now(), 2026);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'trip countries are checked';
+
+  failed := false;
+  begin
+    insert into public.trips (profile_id, name, departs_at, returns_at, season, travel_mode)
+    values ('10000000-0000-4000-8000-000000000001', 'Away', now(), now(), 2026, 'teleport');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'travel modes are checked';
 end
 $$;
 
@@ -324,6 +413,7 @@ begin
   assert (select count(*) from public.wallball_sets) = 0, 'B sees none of A''s wall ball reps';
   assert (select count(*) from public.season_budgets) = 0, 'B sees none of A''s season budgets';
   assert (select count(*) from public.program_budgets) = 0, 'B sees none of A''s program budgets';
+  assert (select count(*) from public.trips) = 0, 'B sees none of A''s trips';
   assert (select count(*) from public.profile_members) = 1, 'B sees only their own membership';
 
   update public.profiles set first_name = 'Hacked' where id = '10000000-0000-4000-8000-000000000001';
@@ -333,6 +423,7 @@ begin
   delete from public.wallball_drills where profile_id = '10000000-0000-4000-8000-000000000001';
   update public.season_budgets set amount = 1 where profile_id = '10000000-0000-4000-8000-000000000001';
   delete from public.program_budgets where profile_id = '10000000-0000-4000-8000-000000000001';
+  update public.trips set hotel_name = 'Hacked' where profile_id = '10000000-0000-4000-8000-000000000001';
 
   failed := false;
   begin
@@ -377,6 +468,15 @@ begin
 
   failed := false;
   begin
+    -- B's own profile, pointing at A's trip.
+    insert into public.expenses (profile_id, spent_at, category, amount, trip_id)
+    values ('10000000-0000-4000-8000-000000000002', now(), 'food', 10, '90000000-0000-4000-8000-000000000001');
+  exception when foreign_key_violation then failed := true;
+  end;
+  assert failed, 'an expense can''t point at another profile''s trip';
+
+  failed := false;
+  begin
     perform public.share_profile('10000000-0000-4000-8000-000000000001', 'b@example.com', 'editor');
   exception when insufficient_privilege then failed := true;
   end;
@@ -400,6 +500,7 @@ begin
   assert (select weight_kg from public.body_measurements where id = '70000000-0000-4000-8000-000000000001') = 48.5, 'B''s weight change did nothing';
   assert (select sum(reps) from public.wallball_sets) = 171, 'B''s reps change did nothing';
   assert (select count(*) from public.wallball_drills) = 1, 'B''s drill delete did nothing';
+  assert (select hotel_name from public.trips) = 'Harbour Inn', 'B''s trip change did nothing';
 end
 $$;
 
@@ -435,6 +536,7 @@ begin
   assert (select count(*) from public.body_measurements) = 2, 'viewer reads height and weight';
   assert (select count(*) from public.wallball_sets) = 4, 'viewer reads wall ball reps';
   assert (select count(*) from public.program_budgets) = 2, 'viewer reads program budgets';
+  assert (select count(*) from public.trips) = 1, 'viewer reads trips';
   begin
     insert into public.expenses (profile_id, spent_at, category, amount)
     values ('10000000-0000-4000-8000-000000000001', now(), 'travel', 10);
@@ -550,7 +652,7 @@ begin
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
     'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
     'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'season_budgets', 'program_budgets',
-    'profile_members'
+    'trips', 'profile_members'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);

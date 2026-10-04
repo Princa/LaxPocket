@@ -47,12 +47,13 @@ public struct CloudSync: Sendable {
         let wallballSets = try await client.select(WallballSetRow.table, filters: byProfile, order: "session_id,position,drill_id,hand", as: WallballSetRow.self)
         let seasonBudgets = try await client.select(SeasonBudgetRow.table, filters: byProfile, order: "season", as: SeasonBudgetRow.self)
         let programBudgets = try await client.select(ProgramBudgetRow.table, filters: byProfile, order: "season,program_id", as: ProgramBudgetRow.self)
+        let trips = try await client.select(TripRow.table, filters: byProfile, order: "departs_at,id", as: TripRow.self)
 
         return ProfileSnapshot.assemble(profile: profile, programs: programs, sessions: sessions, results: results, measurements: measurements,
                                         events: events, stats: stats, reflections: reflections, focus: focus, videos: videos,
                                         checklist: checklist, expenses: expenses, docs: docs, bodyMeasurements: body,
                                         wallballDrills: drills, wallballSessions: wallball, wallballSets: wallballSets,
-                                        seasonBudgets: seasonBudgets, programBudgets: programBudgets)
+                                        seasonBudgets: seasonBudgets, programBudgets: programBudgets, trips: trips)
     }
 
     /// Writes changes for one profile. Parents go before children and deletes go last, so foreign keys hold at every step.
@@ -86,6 +87,8 @@ public struct CloudSync: Sendable {
         try await client.delete(ChecklistItemRow.table, where: "event_id", in: eventIDs, filters: byProfile)
         try await client.upsert(events.flatMap(\.checklist))
 
+        // Trips after programs and events, which they point at, and before the expenses that point at them.
+        try await client.upsert(changes.trips.upserts)
         try await client.upsert(changes.expenses.upserts)
         try await client.upsert(changes.docs.upserts)
         try await client.upsert(changes.bodyMeasurements.upserts)
@@ -102,6 +105,7 @@ public struct CloudSync: Sendable {
         try await client.delete(CombineResultRow.table, where: "id", in: ids(changes.combineResults.deletes), filters: byProfile)
         try await client.delete(EventRow.table, where: "id", in: ids(changes.events.deletes), filters: byProfile)
         try await client.delete(ExpenseRow.table, where: "id", in: ids(changes.expenses.deletes), filters: byProfile)
+        try await client.delete(TripRow.table, where: "id", in: ids(changes.trips.deletes), filters: byProfile)
         try await client.delete(MentalDocRow.table, where: "id", in: ids(changes.docs.deletes), filters: byProfile)
         try await client.delete(BodyMeasurementRow.table, where: "id", in: ids(changes.bodyMeasurements.deletes), filters: byProfile)
         try await client.delete(WallballSessionRow.table, where: "id", in: ids(changes.wallballSessions.deletes), filters: byProfile)
@@ -154,7 +158,7 @@ extension ProfileSnapshot {
                          focus: [FocusGoalRow], videos: [VideoRow], checklist: [ChecklistItemRow], expenses: [ExpenseRow],
                          docs: [MentalDocRow], bodyMeasurements: [BodyMeasurementRow], wallballDrills: [WallballDrillRow] = [],
                          wallballSessions: [WallballSessionRow] = [], wallballSets: [WallballSetRow] = [],
-                         seasonBudgets: [SeasonBudgetRow] = [], programBudgets: [ProgramBudgetRow] = []) -> ProfileSnapshot {
+                         seasonBudgets: [SeasonBudgetRow] = [], programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = []) -> ProfileSnapshot {
         let metricOrder = Dictionary(uniqueKeysWithValues: CombineMetric.allCases.enumerated().map { ($1, $0) })
         let measurementsByResult = Dictionary(grouping: measurements, by: \.resultID)
         let statsByEvent = Dictionary(stats.map { ($0.eventID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -185,7 +189,8 @@ extension ProfileSnapshot {
                 WallballBundle(session: s, sets: (setsBySession[s.id] ?? []).sorted { $0.position < $1.position })
             },
             seasonBudgets: seasonBudgets,
-            programBudgets: programBudgets
+            programBudgets: programBudgets,
+            trips: trips
         )
     }
 }

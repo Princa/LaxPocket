@@ -12,7 +12,7 @@ LaxPocket is local-first: every athlete's data lives in a JSON file on the phone
 4. **Connect the app.** `LaxPocket/Resources/Supabase.plist` holds the **Project URL** and the **anon** (or *publishable*) key; this repository's copy already points at the LaxPocket project. For a different project, replace both values (they're under the project's **Connect** button, or in **Project Settings → API Keys**); [`supabase/Supabase.example.plist`](../supabase/Supabase.example.plist) is a blank template. Then run `xcodegen generate` and build.
 5. **Sign in on the phone.** In the app: **Theme & settings → Cloud sync → Create an account**, then open the link in the confirmation email on the same iPhone (or tap **Resend confirmation email** if it expired). LaxPocket opens signed in. Every athlete on the phone uploads. On a second phone, sign in with the same account and the athletes come down.
 
-**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql), wall ball needs [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql), and budgets by season and program need [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) (it turns each athlete's single budget into the budget for the season they're set to).
+**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql), wall ball needs [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql), budgets by season and program need [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) (it turns each athlete's single budget into the budget for the season they're set to), and tournament trips need [`20261004000000_tournament_trips.sql`](../supabase/migrations/20261004000000_tournament_trips.sql). Builds from before tournament trips can't read the new expense categories (tournament fees, hotel, food, other), so update every phone that syncs an athlete once one of them records a trip.
 
 The anon key is designed to ship inside apps. It only lets a client talk to the API; row-level security decides what each signed-in account can read or write. Never put the `service_role` key in the app.
 
@@ -20,7 +20,7 @@ Once your own accounts exist, you can turn off **Allow new users to sign up** in
 
 ## Schema
 
-The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight, [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql) adds wall ball, and [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) adds budgets by season and program. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
+The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight, [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql) adds wall ball, [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) adds budgets by season and program, and [`20261004000000_tournament_trips.sql`](../supabase/migrations/20261004000000_tournament_trips.sql) adds tournament trips. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
 
 ```mermaid
 erDiagram
@@ -41,6 +41,9 @@ erDiagram
     programs ||--o{ expenses : "for"
     profiles ||--o{ season_budgets : ""
     programs ||--o{ program_budgets : "one per season"
+    profiles ||--o{ trips : ""
+    season_events ||--o{ trips : "to"
+    trips ||--o{ expenses : "cost"
     profiles ||--o{ mental_docs : ""
     profiles ||--o{ body_measurements : ""
     profiles ||--o{ wallball_drills : ""
@@ -62,7 +65,8 @@ erDiagram
 | `event_focus_goals` | pre-game goal | `position`, `goal`, `outcome` (`pending` / `hit` / `partly` / `missed`), `note` |
 | `event_videos` | video link | `position`, `title`, `url`, `duration_text` |
 | `event_checklist_items` | prep checklist item | `position`, `title`, `done` |
-| `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note`, `program_id` (optional; deleting the program clears it), `season` (null on older rows: the season of `spent_at`) |
+| `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note`, `program_id` (optional; deleting the program clears it), `season` (null on older rows: the season of `spent_at`), `trip_id` (optional; deleting the trip clears it) |
+| `trips` | tournament, showcase or camp trip | `name`, `destination`, `country` (`US` / `CA` / `other`), `departs_at` / `returns_at`, `season`, `program_id` and `event_id` (optional; deleting either clears it), `budget`, `travel_mode` (`drive` / `fly` / `bus` / `train` / `other`), `travel_details`, hotel name, address, confirmation number and check-in / check-out (null: the trip's dates), `note`. Days in the US are worked out by the app from the dates and country |
 | `season_budgets` | season with a budget | primary key (`profile_id`, `season`); `amount`, `note` |
 | `program_budgets` | program's budget for one season | primary key (`profile_id`, `program_id`, `season`); `amount`, `note`. A program running several seasons has a row per season |
 | `body_measurements` | height and weight check | `measured_at`, `height_cm` (0.1 cm, 50–250), `weight_kg` (0.01 kg, 10–250), `note`. Either value can be null, not both. Always metric; `profiles.body_units` only sets how the app shows them |

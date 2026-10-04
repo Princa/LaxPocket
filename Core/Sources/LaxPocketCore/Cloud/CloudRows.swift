@@ -263,7 +263,7 @@ public struct ChecklistItemRow: CloudRow {
 
 public struct ExpenseRow: CloudRow {
     public static let table = "expenses"
-    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note", "program_id", "season"]
+    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note", "program_id", "season", "trip_id"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -275,16 +275,17 @@ public struct ExpenseRow: CloudRow {
     public var note: String
     public var programID: String?
     public var season: Int
+    public var tripID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case id, title, category, amount, note, season
-        case profileID = "profile_id", spentAt = "spent_at", programID = "program_id"
+        case profileID = "profile_id", spentAt = "spent_at", programID = "program_id", tripID = "trip_id"
     }
 }
 
 extension ExpenseRow {
     public init(id: UUID, profileID: UUID, spentAt: Timestamp, title: String, category: ExpenseCategory, amount: Double, note: String,
-                programID: String? = nil, season: Int? = nil) {
+                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil) {
         self.id = id
         self.profileID = profileID
         self.spentAt = spentAt
@@ -294,10 +295,11 @@ extension ExpenseRow {
         self.note = note
         self.programID = programID
         self.season = season ?? AthleteProfile.seasonStart(for: spentAt.date)
+        self.tripID = tripID
     }
 
     /// Rows written before expenses had seasons (by an older build, or saved in a sync record) have no season; they
-    /// count toward the season of `spent_at`, the same as on the phone.
+    /// count toward the season of `spent_at`, the same as on the phone. Rows from before trips have no `trip_id`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -309,6 +311,42 @@ extension ExpenseRow {
         note = try c.decode(String.self, forKey: .note)
         programID = try c.decodeIfPresent(String.self, forKey: .programID)
         season = try c.decodeIfPresent(Int.self, forKey: .season) ?? AthleteProfile.seasonStart(for: spentAt.date)
+        tripID = try c.decodeIfPresent(UUID.self, forKey: .tripID)
+    }
+}
+
+public struct TripRow: CloudRow {
+    public static let table = "trips"
+    public static let columns = ["id", "profile_id", "name", "destination", "country", "departs_at", "returns_at", "season", "program_id",
+                                 "event_id", "budget", "travel_mode", "travel_details", "hotel_name", "hotel_address", "hotel_confirmation",
+                                 "hotel_check_in", "hotel_check_out", "note"]
+    public static let conflictColumns = ["id"]
+
+    public var id: UUID
+    public var profileID: UUID
+    public var name: String
+    public var destination: String
+    public var country: TripCountry
+    public var departsAt: Timestamp
+    public var returnsAt: Timestamp
+    public var season: Int
+    public var programID: String?
+    public var eventID: UUID?
+    public var budget: Double
+    public var travelMode: TravelMode
+    public var travelDetails: String
+    public var hotelName: String
+    public var hotelAddress: String
+    public var hotelConfirmation: String
+    public var hotelCheckIn: Timestamp?
+    public var hotelCheckOut: Timestamp?
+    public var note: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, destination, country, season, budget, note
+        case profileID = "profile_id", departsAt = "departs_at", returnsAt = "returns_at", programID = "program_id", eventID = "event_id"
+        case travelMode = "travel_mode", travelDetails = "travel_details", hotelName = "hotel_name", hotelAddress = "hotel_address"
+        case hotelConfirmation = "hotel_confirmation", hotelCheckIn = "hotel_check_in", hotelCheckOut = "hotel_check_out"
     }
 }
 
@@ -495,11 +533,12 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var wallballSessions: [WallballBundle]
     public var seasonBudgets: [SeasonBudgetRow]
     public var programBudgets: [ProgramBudgetRow]
+    public var trips: [TripRow]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
                 events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
                 wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = [], seasonBudgets: [SeasonBudgetRow] = [],
-                programBudgets: [ProgramBudgetRow] = []) {
+                programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -512,16 +551,17 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.wallballSessions = wallballSessions
         self.seasonBudgets = seasonBudgets
         self.programBudgets = programBudgets
+        self.trips = trips
     }
 
     private enum CodingKeys: String, CodingKey {
         case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions,
-             seasonBudgets, programBudgets
+             seasonBudgets, programBudgets, trips
     }
 
     /// Sync records saved before height and weight tracking have no `bodyMeasurements`, those saved before
-    /// wall ball have no `wallballDrills` or `wallballSessions`, and those saved before budgets per season have
-    /// no `seasonBudgets` or `programBudgets`.
+    /// wall ball have no `wallballDrills` or `wallballSessions`, those saved before budgets per season have
+    /// no `seasonBudgets` or `programBudgets`, and those saved before trips have no `trips`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfileRow.self, forKey: .profile)
@@ -536,6 +576,7 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         wallballSessions = try c.decodeIfPresent([WallballBundle].self, forKey: .wallballSessions) ?? []
         seasonBudgets = try c.decodeIfPresent([SeasonBudgetRow].self, forKey: .seasonBudgets) ?? []
         programBudgets = try c.decodeIfPresent([ProgramBudgetRow].self, forKey: .programBudgets) ?? []
+        trips = try c.decodeIfPresent([TripRow].self, forKey: .trips) ?? []
     }
 }
 
@@ -653,11 +694,27 @@ extension ProfileSnapshot {
                 }
             )
         }
+        let eventIDs = Set(data.events.map(\.id))
+        trips = data.trips.map { t in
+            // Dates typed backwards are turned around, the same as program seasons.
+            let departs = min(t.departureDate, t.returnDate), returns = max(t.departureDate, t.returnDate)
+            var checkIn = t.hotelCheckIn, checkOut = t.hotelCheckOut
+            if let a = checkIn, let b = checkOut, b < a { (checkIn, checkOut) = (b, a) }
+            return TripRow(id: t.id, profileID: pid, name: t.name, destination: t.destination, country: t.country,
+                           departsAt: Timestamp(departs), returnsAt: Timestamp(returns),
+                           season: validSeason(t.season) ?? AthleteProfile.seasonStart(for: departs),
+                           programID: t.programID.flatMap { programIDs.contains($0) ? $0 : nil },
+                           eventID: t.eventID.flatMap { eventIDs.contains($0) ? $0 : nil },
+                           budget: max(roundedTo(2, t.budget), 0), travelMode: t.travelMode, travelDetails: t.travelDetails,
+                           hotelName: t.hotelName, hotelAddress: t.hotelAddress, hotelConfirmation: t.hotelConfirmation,
+                           hotelCheckIn: checkIn.map(Timestamp.init), hotelCheckOut: checkOut.map(Timestamp.init), note: t.note)
+        }
+        let tripIDs = Set(data.trips.map(\.id))
         expenses = data.expenses.map { x in
-            // A link to a program that's gone would fail the foreign key, so it's dropped.
+            // A link to a program or trip that's gone would fail the foreign key, so it's dropped.
             ExpenseRow(id: x.id, profileID: pid, spentAt: Timestamp(x.date), title: x.title, category: x.category,
                        amount: roundedTo(2, x.amount), note: x.note, programID: x.programID.flatMap { programIDs.contains($0) ? $0 : nil },
-                       season: validSeason(x.season))
+                       season: validSeason(x.season), tripID: x.tripID.flatMap { tripIDs.contains($0) ? $0 : nil })
         }
         seasonBudgets = data.seasonBudgets.compactMap { b in
             guard let season = validSeason(b.season), roundedTo(2, b.amount) > 0 else { return nil }
@@ -703,7 +760,7 @@ extension ProfileSnapshot {
             events: events.sorted { $0.event.startsAt < $1.event.startsAt }.map(\.seasonEvent),
             expenses: expenses.sorted { $0.spentAt < $1.spentAt }.map { r in
                 Expense(id: r.id, date: r.spentAt.date, title: r.title, category: r.category, amount: r.amount, note: r.note,
-                        programID: r.programID, season: r.season)
+                        programID: r.programID, season: r.season, tripID: r.tripID)
             },
             docs: docs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.compactMap { r in
                 URL(string: r.url).map {
@@ -727,6 +784,13 @@ extension ProfileSnapshot {
             seasonBudgets: seasonBudgets.sorted { $0.season < $1.season }.map { SeasonBudget(season: $0.season, amount: $0.amount, note: $0.note) },
             programBudgets: programBudgets.sorted { ($0.season, $0.programID) < ($1.season, $1.programID) }.map {
                 ProgramBudget(programID: $0.programID, season: $0.season, amount: $0.amount, note: $0.note)
+            },
+            trips: trips.sorted { ($0.departsAt, $0.id.uuidString) < ($1.departsAt, $1.id.uuidString) }.map { r in
+                Trip(id: r.id, name: r.name, destination: r.destination, country: r.country, departureDate: r.departsAt.date,
+                     returnDate: r.returnsAt.date, season: r.season, programID: r.programID, eventID: r.eventID, budget: r.budget,
+                     travelMode: r.travelMode, travelDetails: r.travelDetails, hotelName: r.hotelName, hotelAddress: r.hotelAddress,
+                     hotelConfirmation: r.hotelConfirmation, hotelCheckIn: r.hotelCheckIn?.date, hotelCheckOut: r.hotelCheckOut?.date,
+                     note: r.note)
             }
         )
     }
@@ -771,5 +835,6 @@ extension ProfileSnapshot {
             && Set(bodyMeasurements) == Set(other.bodyMeasurements)
             && Set(wallballDrills) == Set(other.wallballDrills) && Set(wallballSessions) == Set(other.wallballSessions)
             && Set(seasonBudgets) == Set(other.seasonBudgets) && Set(programBudgets) == Set(other.programBudgets)
+            && Set(trips) == Set(other.trips)
     }
 }

@@ -163,6 +163,31 @@ final class AppStore {
         update { $0.expenses.removeAll { ids.contains($0.id) } }
     }
 
+    func trip(_ id: UUID) -> Trip? { data.trip(id: id) }
+
+    /// Adds the trip, or replaces the one with the same ID.
+    func saveTrip(_ trip: Trip) {
+        update { data in
+            if let index = data.trips.firstIndex(where: { $0.id == trip.id }) {
+                data.trips[index] = trip
+            } else {
+                data.trips.append(trip)
+            }
+        }
+    }
+
+    /// Deletes the trip. Its expenses are deleted with it, or kept without the link.
+    func deleteTrip(_ id: UUID, withExpenses: Bool) {
+        update { data in
+            data.trips.removeAll { $0.id == id }
+            if withExpenses {
+                data.expenses.removeAll { $0.tripID == id }
+            } else {
+                for index in data.expenses.indices where data.expenses[index].tripID == id { data.expenses[index].tripID = nil }
+            }
+        }
+    }
+
     func addCombineResult(_ result: CombineResult) {
         update { $0.combineResults.append(result) }
     }
@@ -178,8 +203,12 @@ final class AppStore {
         }
     }
 
+    /// Deletes the event. A trip to it stays, without the link.
     func deleteEvent(_ id: UUID) {
-        update { $0.events.removeAll { $0.id == id } }
+        update { data in
+            data.events.removeAll { $0.id == id }
+            for index in data.trips.indices where data.trips[index].eventID == id { data.trips[index].eventID = nil }
+        }
     }
 
     /// Adds the program, or replaces the one with the same ID.
@@ -199,12 +228,13 @@ final class AppStore {
         !data.sessions.contains { $0.programID == id } && !data.expenses.contains { $0.programID == id }
     }
 
-    /// Deletes the program and its budgets.
+    /// Deletes the program and its budgets. Trips with it stay, without the link.
     func deleteProgram(_ id: String) {
         guard canDeleteProgram(id) else { return }
         update { data in
             data.programs.removeAll { $0.id == id }
             data.programBudgets.removeAll { $0.programID == id }
+            for index in data.trips.indices where data.trips[index].programID == id { data.trips[index].programID = nil }
         }
     }
 

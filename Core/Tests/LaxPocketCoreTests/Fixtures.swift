@@ -41,6 +41,13 @@ enum Fixtures {
             Expense(date: day(-10), title: "Club 2031 · season fee", category: .teamFees, amount: 1850, programID: "club"),
             Expense(date: day(-2), title: "Skills coach · 4-pack", category: .coaching, amount: 320.5, note: "Paid in USD")
         ]
+        // The showcase trip; its expenses are added by the tests that need them.
+        let trips = [
+            Trip(name: "Fall showcase", destination: "Somewhere, ON", country: .canada, departureDate: day(59, hour: 8),
+                 returnDate: day(61, hour: 21), programID: "club", eventID: events[1].id, budget: 1500, travelMode: .drive,
+                 travelDetails: "Carpool with the Smiths", hotelName: "Harbour Inn", hotelAddress: "1 Main St", hotelConfirmation: "ABC123",
+                 hotelCheckIn: day(59, hour: 15), note: "Bring the team jacket")
+        ]
         let docs = [
             MentalDoc(title: "Pre-game routine", url: URL(string: "https://docs.google.com/document/d/abc/edit?rtpof=true")!, folder: .routines,
                       status: .toReview, updatedAt: day(1), updatedBy: "Coach", note: "3 comments")
@@ -72,6 +79,7 @@ enum Fixtures {
                            ProgramBudget(programID: "club", season: 2026, amount: 3000),
                            ProgramBudget(programID: "skills-coach", season: 2026, amount: 1200),
                            ProgramBudget(programID: "club", season: 2027, amount: 3200, note: "Fee goes up")
-                       ])
+                       ],
+                       trips: trips)
     }
 }

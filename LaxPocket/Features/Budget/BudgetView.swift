@@ -1,7 +1,7 @@
 import SwiftUI
 import LaxPocketCore
 
-/// One season's budget: spending against the season budget, by program and by category, and the expenses.
+/// One season's budget: spending against the season budget, tournament trips, by program and by category, and the expenses.
 struct BudgetView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
@@ -10,6 +10,7 @@ struct BudgetView: View {
     @State private var editing: ExpenseEditTarget?
     @State private var showBudgetEditor = false
     @State private var showAll = false
+    @State private var showTripEditor = false
 
     var body: some View {
         let data = store.data
@@ -24,6 +25,8 @@ struct BudgetView: View {
             VStack(alignment: .leading, spacing: 14) {
                 header(season: season, current: current)
                 summaryCard(overview, nextShowcase: nextShowcase)
+
+                tripsSection(season: season, data: data)
 
                 if !overview.programs.isEmpty {
                     SectionHeader(title: "By program").padding(.top, 8)
@@ -85,8 +88,12 @@ struct BudgetView: View {
         }
         .background(AppTheme.background)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $editing) { target in ExpenseEditorView(expense: target.expense, programID: target.programID, season: target.season) }
+        .sheet(item: $editing) { target in
+            ExpenseEditorView(expense: target.expense, programID: target.programID, season: target.season, tripID: target.tripID,
+                              category: target.category)
+        }
         .sheet(isPresented: $showBudgetEditor) { BudgetEditorView(season: season, data: store.data) }
+        .sheet(isPresented: $showTripEditor) { TripEditorView(season: season) }
     }
 
     // MARK: - Pieces
@@ -185,6 +192,82 @@ struct BudgetView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Trips
+
+    @ViewBuilder
+    private func tripsSection(season: Int, data: AppData) -> some View {
+        let trips = data.trips(in: season)
+        SectionHeader(title: "Tournament trips") {
+            Button { showTripEditor = true } label: { Label("Add trip", systemImage: "plus") }
+                .font(.system(size: 14, weight: .semibold))
+        }
+        .padding(.top, 8)
+
+        if trips.isEmpty {
+            Card {
+                Text("Going to a tournament? Add a trip to keep its fees, travel, hotel and food together, and count the days in the US.")
+                    .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+            }
+        } else {
+            Card(padding: 0) {
+                ForEach(Array(trips.enumerated()), id: \.element.id) { index, trip in
+                    NavigationLink { TripView(tripID: trip.id) } label: {
+                        tripRow(TripMath.summary(trip, in: data)).padding(.horizontal, 14)
+                    }
+                    .buttonStyle(.plain)
+                    if index < trips.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                }
+            }
+            usDaysNote(season: season, data: data)
+        }
+    }
+
+    private func tripRow(_ summary: TripSummary) -> some View {
+        let trip = summary.trip
+        return HStack(spacing: 12) {
+            DateBadge(top: Formatters.monthShort(trip.departureDate), bottom: Formatters.dayNumber(trip.departureDate))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(trip.name.isEmpty ? "Trip" : trip.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+                Text([trip.destination, TripDates.range(trip), summary.days == 1 ? "1 day" : "\(summary.days) days"]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                    .font(.system(size: 13)).foregroundStyle(AppTheme.caption).lineLimit(1)
+                if trip.isInUS {
+                    Pill(text: "US · \(summary.days == 1 ? "1 day" : "\(summary.days) days")", background: theme.accentTint,
+                         foreground: theme.accentText, systemImage: "airplane")
+                        .padding(.top, 2)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(Formatters.money(summary.spent)).font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(summary.isOverBudget ? theme.accentText : AppTheme.ink)
+                if trip.budget > 0 {
+                    Text("of \(Formatters.money(trip.budget))").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                }
+            }
+            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron)
+        }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Days in the US this season, and in each calendar year the season touches, counting every trip (a day two trips
+    /// share counts once).
+    private func usDaysNote(season: Int, data: AppData) -> some View {
+        let inSeason = TripMath.usDays(data.trips, in: TripMath.interval(season: season))
+        let years = [season, season + 1].map { ($0, TripMath.usDays(data.trips, in: TripMath.interval(year: $0)).days) }
+        func days(_ n: Int) -> String { n == 1 ? "1 day" : "\(n) days" }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("\(days(inSeason.days)) in the US this season\(inSeason.trips > 0 ? " (\(inSeason.trips == 1 ? "1 trip" : "\(inSeason.trips) trips"))" : "")")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink2)
+            Text(years.map { "\(days($0.1)) in \(String($0.0))" }.joined(separator: " · ") + ", counting every trip.")
+                .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
     }
 
     private func programRow(_ line: ProgramSpend) -> some View {
