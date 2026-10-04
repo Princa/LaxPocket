@@ -1,0 +1,9 @@
+// Code signing for building to your iPhone.
+//
+// Your Apple developer team goes in Config/Local.xcconfig, which isn't committed (scripts/setup-mac.sh writes it):
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//
+// Because the team lives here rather than in the generated project, regenerating the project with xcodegen keeps
+// it, and you don't pick the team again in Signing & Capabilities. CI builds without signing, so it doesn't need one.
+#include? "Local.xcconfig"

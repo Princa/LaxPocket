@@ -27,6 +27,10 @@ targets:
       - path: LaxPocket
     dependencies:
       - package: LaxPocketCore
+    # The signing team comes from Config/Local.xcconfig (not committed), so regenerating keeps it. See scripts/setup-mac.sh.
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     info:
       path: LaxPocket/Info.plist
       properties:
