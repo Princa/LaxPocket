@@ -13,6 +13,8 @@ major_version = 17
 [auth]
 enabled = true
 site_url = "http://127.0.0.1:3000"
+# The confirmation email's link opens the app (CloudStore.authRedirectURL).
+additional_redirect_urls = ["laxpocket://auth-callback"]
 enable_signup = true
 
 [auth.email]

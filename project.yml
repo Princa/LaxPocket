@@ -37,6 +37,11 @@ targets:
         UILaunchScreen:
           UIColorName: AccentColor
         UIApplicationSupportsIndirectInputEvents: true
+        # laxpocket://auth-callback: the link in Supabase's confirmation email opens the app and signs in.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.princa.laxpocket
+            CFBundleURLSchemes:
+              - laxpocket
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:
