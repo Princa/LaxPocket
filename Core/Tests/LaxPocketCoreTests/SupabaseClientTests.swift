@@ -98,6 +98,45 @@ final class SupabaseClientTests: XCTestCase {
         XCTAssertEqual(transport.requests[0].url?.path, "/auth/v1/signup")
     }
 
+    func testSignUpSendsTheRedirect() async throws {
+        let transport = FakeTransport([.init(body: #"{"id": "00000000-0000-4000-8000-00000000000a", "email": "a@example.com"}"#)])
+        _ = try await client(transport).signUp(email: "a@example.com", password: "secret", redirectTo: URL(string: "laxpocket://auth-callback")!)
+        XCTAssertEqual(transport.requests[0].url?.absoluteString, "https://abc.supabase.co/auth/v1/signup?redirect_to=laxpocket://auth-callback")
+    }
+
+    func testResendConfirmation() async throws {
+        let transport = FakeTransport([.init(body: "{}")])
+        try await client(transport).resendConfirmation(email: "a@example.com", redirectTo: URL(string: "laxpocket://auth-callback")!)
+        XCTAssertEqual(transport.requests[0].url?.path, "/auth/v1/resend")
+        XCTAssertEqual(transport.query(0), ["redirect_to": "laxpocket://auth-callback"])
+        XCTAssertEqual(transport.json(0) as? [String: String], ["type": "signup", "email": "a@example.com"])
+    }
+
+    func testSignInFromConfirmationLink() async throws {
+        let transport = FakeTransport([.init(body: #"{"id": "00000000-0000-4000-8000-00000000000a", "email": "a@example.com"}"#)])
+        let client = client(transport)
+        let link = URL(string: "laxpocket://auth-callback#access_token=new-access&expires_at=1790003600&expires_in=3600&refresh_token=new-refresh&token_type=bearer&type=signup")!
+        let session = try await client.signIn(fromRedirect: link)
+        XCTAssertEqual(session, AuthSession(accessToken: "new-access", refreshToken: "new-refresh",
+                                            expiresAt: Date(timeIntervalSince1970: 1_790_003_600), userID: userID, email: "a@example.com"))
+        XCTAssertEqual(transport.requests[0].url?.absoluteString, "https://abc.supabase.co/auth/v1/user")
+        XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer new-access")
+        let stored = await client.session
+        XCTAssertEqual(stored, session)
+    }
+
+    func testExpiredConfirmationLink() async {
+        let transport = FakeTransport([])
+        let link = URL(string: "laxpocket://auth-callback#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired")!
+        do {
+            _ = try await client(transport).signIn(fromRedirect: link)
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? CloudError, .server(status: 403, code: "otp_expired", message: "Email link is invalid or has expired"))
+        }
+        XCTAssertTrue(transport.requests.isEmpty)
+    }
+
     func testSelectFollowsPages() async throws {
         let transport = FakeTransport([
             .init(body: #"[{"n": 1}, {"n": 2}]"#, headers: ["Content-Range": "0-1/3"]),

@@ -17,6 +17,10 @@ final class CloudStore {
     private(set) var lastError: String?
     /// Athletes in the cloud that aren't on this iPhone.
     private(set) var remoteOnly: [ProfileRow] = []
+    /// What happened when the app was opened from a confirmation email; shown once, then cleared.
+    var authNotice: String?
+    /// True while Cloud sync is on screen, which shows `authNotice` itself.
+    var isShowingCloudSync = false
 
     @ObservationIgnored private let appStore: AppStore
     @ObservationIgnored private var client: SupabaseClient?
@@ -26,6 +30,11 @@ final class CloudStore {
     @ObservationIgnored private var downloadAllOnNextSync = false
 
     private static let sessionAccount = "session"
+
+    /// Where the confirmation email's link sends people once their email is confirmed: back into the app
+    /// (the `laxpocket` URL scheme in project.yml). Supabase only uses it if it's listed under
+    /// Authentication → URL Configuration → Redirect URLs.
+    nonisolated static let authRedirectURL = URL(string: "laxpocket://auth-callback")!
 
     init(appStore: AppStore, config: SupabaseConfig? = CloudStore.bundledConfig) {
         self.appStore = appStore
@@ -73,7 +82,8 @@ final class CloudStore {
     /// Returns true when the project wants the new account to confirm its email first.
     func signUp(email: String, password: String) async throws -> Bool {
         guard let client else { return false }
-        switch try await client.signUp(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password) {
+        switch try await client.signUp(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password,
+                                       redirectTo: CloudStore.authRedirectURL) {
         case .signedIn(let newSession):
             sessionChanged(newSession)
             lastError = nil
@@ -81,6 +91,33 @@ final class CloudStore {
             return false
         case .confirmEmail:
             return true
+        }
+    }
+
+    func resendConfirmation(email: String) async throws {
+        try await client?.resendConfirmation(email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                                             redirectTo: CloudStore.authRedirectURL)
+    }
+
+    /// Opens the link from a confirmation email: signs in to the new account and syncs.
+    func handleRedirect(_ url: URL) async {
+        guard let client, url.scheme == CloudStore.authRedirectURL.scheme, url.host == CloudStore.authRedirectURL.host else { return }
+        if let current = session {
+            // Switching accounts here would leave this account's sync records behind; signing out clears them.
+            authNotice = "This iPhone is signed in as \(current.email ?? "another account"). To use the new account, sign out in Cloud sync, then sign in with it."
+            return
+        }
+        do {
+            let newSession = try await client.signIn(fromRedirect: url)
+            sessionChanged(newSession)
+            lastError = nil
+            downloadAllOnNextSync = appStore.profiles.isEmpty
+            authNotice = "Email confirmed. You’re signed in as \(newSession.email ?? "your new account") and your athletes are syncing."
+            await syncNow()
+        } catch CloudError.server(_, "otp_expired", _) {
+            authNotice = "That confirmation link has expired or was already used. Try signing in; if your email isn’t confirmed yet, tap Resend confirmation email."
+        } catch {
+            authNotice = "Couldn’t finish signing in: \(error.localizedDescription)"
         }
     }
 

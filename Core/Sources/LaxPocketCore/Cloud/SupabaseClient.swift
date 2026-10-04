@@ -131,14 +131,50 @@ public actor SupabaseClient {
         return newSession
     }
 
-    public func signUp(email: String, password: String) async throws -> SignUpResult {
+    /// `redirectTo` is where the confirmation email's link lands once the email is confirmed. Supabase
+    /// only uses it if it's listed under Authentication → URL Configuration → Redirect URLs, and falls
+    /// back to the project's Site URL otherwise.
+    public func signUp(email: String, password: String, redirectTo: URL? = nil) async throws -> SignUpResult {
         let body = try JSONEncoder().encode(["email": email, "password": password])
-        let data = try await authRequest("signup", body: body)
+        let data = try await authRequest("signup", query: SupabaseClient.redirectQuery(redirectTo), body: body)
         if let newSession = try? decodeSession(data) {
             store(newSession)
             return .signedIn(newSession)
         }
         return .confirmEmail
+    }
+
+    /// Sends the confirmation email again, for when the first link expired or got lost.
+    public func resendConfirmation(email: String, redirectTo: URL? = nil) async throws {
+        let body = try JSONEncoder().encode(["type": "signup", "email": email])
+        _ = try await authRequest("resend", query: SupabaseClient.redirectQuery(redirectTo), body: body)
+    }
+
+    /// Signs in from the link in a confirmation email. Supabase confirms the email, then opens the
+    /// redirect URL with the new session in its fragment (`#access_token=…&refresh_token=…&expires_in=…`),
+    /// or with an error (`#error_code=otp_expired&error_description=…`) when the link was already used
+    /// or has expired.
+    public func signIn(fromRedirect url: URL) async throws -> AuthSession {
+        let params = SupabaseClient.redirectParameters(url)
+        if let message = params["error_description"] ?? params["error"] {
+            throw CloudError.server(status: 403, code: params["error_code"], message: message)
+        }
+        guard let accessToken = params["access_token"], let refreshToken = params["refresh_token"] else {
+            throw CloudError.invalidResponse
+        }
+        // The fragment doesn't say which account it is, so ask; that also checks the token is genuine.
+        var request = URLRequest(url: config.authURL.appendingPathComponent("user"))
+        request.setValue(config.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await transport.send(request)
+        try SupabaseClient.check(response, data)
+        let user = try JSONDecoder().decode(TokenResponse.User.self, from: data)
+        let expiresAt = params["expires_at"].flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
+            ?? now().addingTimeInterval(params["expires_in"].flatMap(Double.init) ?? 3600)
+        let newSession = AuthSession(accessToken: accessToken, refreshToken: refreshToken, expiresAt: expiresAt,
+                                     userID: user.id, email: user.email)
+        store(newSession)
+        return newSession
     }
 
     /// Ends the session on the server (best effort) and forgets it here.
@@ -323,6 +359,24 @@ public actor SupabaseClient {
         // URLComponents leaves "+" alone, which servers read as a space.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url ?? base
+    }
+
+    static func redirectQuery(_ redirectTo: URL?) -> [URLQueryItem] {
+        redirectTo.map { [URLQueryItem(name: "redirect_to", value: $0.absoluteString)] } ?? []
+    }
+
+    /// The `key=value` pairs in a redirect URL's query and fragment; the fragment wins.
+    static func redirectParameters(_ url: URL) -> [String: String] {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return [:] }
+        var result: [String: String] = [:]
+        for encoded in [components.percentEncodedQuery, components.percentEncodedFragment] {
+            guard let encoded else { continue }
+            var form = URLComponents()
+            // Form encoding writes spaces as "+" ("Email+link+is+invalid"); a real plus arrives as %2B.
+            form.percentEncodedQuery = encoded.replacingOccurrences(of: "+", with: "%20")
+            for item in form.queryItems ?? [] { result[item.name] = item.value ?? "" }
+        }
+        return result
     }
 
     /// A value for a PostgREST `in.(…)` list: double-quoted, with quotes and backslashes escaped.

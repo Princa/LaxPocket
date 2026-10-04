@@ -11,9 +11,17 @@ struct CloudSyncView: View {
     @State private var message: String?
     @State private var showShare = false
     @State private var pendingCloudDelete: ProfileRow?
+    /// After creating an account, or signing in before confirming the email.
+    @State private var awaitingConfirmation = false
 
     var body: some View {
         Form {
+            if let notice = cloud.authNotice {
+                Section {
+                    Text(notice)
+                    Button("OK") { cloud.authNotice = nil }
+                }
+            }
             if !cloud.isConfigured {
                 notConfigured
             } else if let session = cloud.session {
@@ -23,6 +31,8 @@ struct CloudSyncView: View {
             }
         }
         .navigationTitle("Cloud sync")
+        .onAppear { cloud.isShowingCloudSync = true }
+        .onDisappear { cloud.isShowingCloudSync = false }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showShare) { ShareAthleteView(summary: store.data.summary) }
         .confirmationDialog("Delete \(pendingCloudDelete?.firstName ?? "this athlete") from the cloud?",
@@ -65,7 +75,15 @@ struct CloudSyncView: View {
 
         Section {
             Button {
-                run { try await cloud.signIn(email: email, password: password) }
+                run {
+                    do {
+                        try await cloud.signIn(email: email, password: password)
+                    } catch CloudError.server(_, "email_not_confirmed", _) {
+                        awaitingConfirmation = true
+                        throw CloudError.server(status: 400, code: "email_not_confirmed",
+                                                message: "Confirm your email first: open the link we sent to \(email) on this iPhone.")
+                    }
+                }
             } label: {
                 HStack {
                     Text("Sign in")
@@ -76,11 +94,21 @@ struct CloudSyncView: View {
             Button("Create an account") {
                 run {
                     if try await cloud.signUp(email: email, password: password) {
-                        message = "Check \(email) for a confirmation link, then come back and sign in."
+                        awaitingConfirmation = true
+                        message = "Check \(email) for a confirmation link and open it on this iPhone. LaxPocket opens and signs you in."
                     }
                 }
             }
             .disabled(!canSubmit)
+            if awaitingConfirmation {
+                Button("Resend confirmation email") {
+                    run {
+                        try await cloud.resendConfirmation(email: email)
+                        message = "Sent another link to \(email)."
+                    }
+                }
+                .disabled(isWorking || !email.contains("@"))
+            }
         } footer: {
             if let message { Text(message) }
         }
