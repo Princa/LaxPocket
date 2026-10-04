@@ -157,9 +157,9 @@ struct TripView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Trip cost").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(Formatters.money(summary.spent)).font(.display(48)).foregroundStyle(theme.primary)
+                        Text(store.money(summary.spent)).font(.display(48)).foregroundStyle(theme.primary)
                         if trip.budget > 0 {
-                            Text("of \(Formatters.money(trip.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
+                            Text("of \(store.money(trip.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
                         }
                     }
                 }
@@ -167,7 +167,7 @@ struct TripView: View {
                     ProgressView(value: min(summary.spent / trip.budget, 1))
                         .tint(summary.isOverBudget ? theme.accentText : theme.primary)
                         .scaleEffect(x: 1, y: 2, anchor: .center)
-                    Text(summary.isOverBudget ? "\(Formatters.money(-summary.remaining)) over budget" : "\(Formatters.money(summary.remaining)) left")
+                    Text(summary.isOverBudget ? "\(store.money(-summary.remaining)) over budget" : "\(store.money(summary.remaining)) left")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(summary.isOverBudget ? theme.accentText : AppTheme.ink2)
                 }
@@ -214,7 +214,7 @@ struct TripView: View {
                 Text(costCaption(category, count: count, summary: summary)).font(.system(size: 12)).foregroundStyle(AppTheme.caption)
             }
             Spacer()
-            Text(amount > 0 ? Formatters.money(amount) : "—")
+            Text(amount > 0 ? store.money(amount) : "—")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(amount > 0 ? AppTheme.ink : AppTheme.caption)
             Button { editing = newExpense(summary.trip, category: category) } label: {
@@ -230,10 +230,10 @@ struct TripView: View {
 
     private func costCaption(_ category: ExpenseCategory, count: Int, summary: TripSummary) -> String {
         if category == .lodging, let perNight = summary.lodgingPerNight {
-            return "\(Formatters.money(perNight)) a night · \(summary.hotelNights == 1 ? "1 night" : "\(summary.hotelNights) nights")"
+            return "\(store.money(perNight)) a night · \(summary.hotelNights == 1 ? "1 night" : "\(summary.hotelNights) nights")"
         }
         if category == .food, let perDay = summary.foodPerDay {
-            return "\(Formatters.money(perDay)) a day"
+            return "\(store.money(perDay)) a day"
         }
         if count == 0 { return category.tripHint }
         return count == 1 ? "1 expense" : "\(count) expenses"

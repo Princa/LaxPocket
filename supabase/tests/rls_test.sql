@@ -157,9 +157,15 @@ insert into public.expenses (id, profile_id, spent_at, title, category, amount, 
   ('50000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000001', '2026-10-18T12:00:00Z', 'Hotel, 3 nights', 'lodging', 690, 'club', 2026, '90000000-0000-4000-8000-000000000001'),
   ('50000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', '2026-10-17T12:00:00Z', 'Team dinner', 'food', 85.5, null, 2026, '90000000-0000-4000-8000-000000000001'),
   ('50000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000001', '2026-10-15T12:00:00Z', 'Tolls', 'other', 22, null, 2026, '90000000-0000-4000-8000-000000000001');
+-- The hotel was paid in US dollars: US$500 at 1.38.
+update public.expenses set currency = 'USD', original_amount = 500 where id = '50000000-0000-4000-8000-000000000004';
 do $$
 begin
   assert (select sum(amount) from public.expenses where trip_id = '90000000-0000-4000-8000-000000000001') = 1197.5, 'A sees what the trip cost';
+  assert (select currency = 'USD' and original_amount = 500 and amount = 690 from public.expenses
+          where id = '50000000-0000-4000-8000-000000000004'), 'an expense keeps what was paid in US dollars and its CAD amount';
+  assert (select count(*) from public.expenses where currency = 'CAD' and original_amount is null) = 4, 'expenses are CAD by default';
+  assert (select usd_to_cad from public.profiles) = 1.38, 'profiles start with the built-in exchange rate';
   assert (select hotel_check_in is null and travel_details = '' and note = '' from public.trips), 'trip details default to blank';
 end
 $$;
@@ -388,6 +394,37 @@ begin
   exception when check_violation then failed := true;
   end;
   assert failed, 'travel modes are checked';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount, currency, original_amount)
+    values ('10000000-0000-4000-8000-000000000001', now(), 'food', 10, 'EUR', 7);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'currencies are CAD or USD';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount, currency)
+    values ('10000000-0000-4000-8000-000000000001', now(), 'food', 10, 'USD');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a US-dollar expense keeps what was paid';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount, original_amount)
+    values ('10000000-0000-4000-8000-000000000001', now(), 'food', 10, 7);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a CAD expense has no other amount';
+
+  failed := false;
+  begin
+    update public.profiles set usd_to_cad = 0 where id = '10000000-0000-4000-8000-000000000001';
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'the exchange rate is in a sensible range';
 end
 $$;
 

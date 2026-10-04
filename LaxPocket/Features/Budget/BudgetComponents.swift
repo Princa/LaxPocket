@@ -21,6 +21,11 @@ enum AmountText {
     static func string(_ value: Double) -> String {
         value == value.rounded() ? String(format: "%.0f", value) : String(format: "%.2f", value)
     }
+
+    /// "1.38" or "1.3725", for filling in an exchange rate field.
+    static func rate(_ value: Double) -> String {
+        String(format: "%g", (value * 10_000).rounded() / 10_000)
+    }
 }
 
 /// One expense in a list: date, title, category and program, amount, and the start of its notes.
@@ -51,7 +56,13 @@ struct ExpenseListRow: View {
                 }
             }
             Spacer()
-            Text(Formatters.money(expense.amount)).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(store.money(expense)).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                // Paid in the other currency: show that too.
+                if expense.currency != store.displayCurrency {
+                    Text(Formatters.money(expense.paidAmount, currency: expense.currency)).font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                }
+            }
             Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron).padding(.top, 2)
         }
         .padding(.vertical, 12)

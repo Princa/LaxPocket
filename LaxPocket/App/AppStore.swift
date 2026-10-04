@@ -15,6 +15,10 @@ final class AppStore {
     private(set) var index: ProfileIndex
     /// Which tab is showing (not saved).
     var selectedTab: AppTab = .home
+    /// The currency the budget screens show amounts in, on this device. Amounts are stored and added up in CAD.
+    var displayCurrency: Currency = AppStore.savedDisplayCurrency {
+        didSet { UserDefaults.standard.set(displayCurrency.rawValue, forKey: AppStore.displayCurrencyKey) }
+    }
     let library: ProfileLibrary
     /// Called after the user changes a profile's data, with that profile's ID. Cloud sync listens here.
     @ObservationIgnored var onLocalChange: (@MainActor (UUID) -> Void)?
@@ -51,6 +55,21 @@ final class AppStore {
     var now: Date { Date() }
 
     func program(_ id: String) -> Program? { data.program(id: id) }
+
+    private static let displayCurrencyKey = "budgetDisplayCurrency"
+    private static var savedDisplayCurrency: Currency {
+        UserDefaults.standard.string(forKey: displayCurrencyKey).flatMap(Currency.init(rawValue:)) ?? .cad
+    }
+
+    /// A CAD amount in the display currency, converted at the athlete's exchange rate.
+    func money(_ cad: Double) -> String {
+        Formatters.money(ExchangeRate.shown(cad, in: displayCurrency, rate: profile.usdToCAD), currency: displayCurrency)
+    }
+
+    /// An expense in the display currency: exactly what was paid when it was paid in that currency.
+    func money(_ expense: Expense) -> String {
+        expense.currency == displayCurrency ? Formatters.money(expense.paidAmount, currency: displayCurrency) : money(expense.amount)
+    }
 
     // MARK: - Profiles
 
@@ -164,6 +183,11 @@ final class AppStore {
     }
 
     func trip(_ id: UUID) -> Trip? { data.trip(id: id) }
+
+    /// Sets the athlete's exchange rate. With `reconvert`, US-dollar expenses are converted again at the new rate.
+    func setUSDToCAD(_ rate: Double, reconvert: Bool) {
+        update { $0.setUSDToCAD(rate, reconvert: reconvert) }
+    }
 
     /// Adds the trip, or replaces the one with the same ID.
     func saveTrip(_ trip: Trip) {

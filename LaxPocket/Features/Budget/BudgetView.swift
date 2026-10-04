@@ -11,6 +11,7 @@ struct BudgetView: View {
     @State private var showBudgetEditor = false
     @State private var showAll = false
     @State private var showTripEditor = false
+    @State private var showRateEditor = false
 
     var body: some View {
         let data = store.data
@@ -94,6 +95,7 @@ struct BudgetView: View {
         }
         .sheet(isPresented: $showBudgetEditor) { BudgetEditorView(season: season, data: store.data) }
         .sheet(isPresented: $showTripEditor) { TripEditorView(season: season) }
+        .sheet(isPresented: $showRateEditor) { ExchangeRateView() }
     }
 
     // MARK: - Pieces
@@ -117,7 +119,7 @@ struct BudgetView: View {
                         .font(.system(size: 14, weight: .semibold))
                     }
                     .accessibilityLabel("Season: \(AthleteProfile.seasonLabel(start: season))")
-                    Text("· all amounts CAD").font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                    currencyMenu
                 }
             }
             Spacer()
@@ -140,9 +142,9 @@ struct BudgetView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Spent so far").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(Formatters.money(summary.spent)).font(.display(54)).foregroundStyle(theme.primary)
+                            Text(store.money(summary.spent)).font(.display(54)).foregroundStyle(theme.primary)
                             if summary.budget > 0 {
-                                Text("of \(Formatters.money(summary.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
+                                Text("of \(store.money(summary.budget))").font(.system(size: 14)).foregroundStyle(AppTheme.caption)
                             }
                         }
                     }
@@ -160,7 +162,7 @@ struct BudgetView: View {
                         .scaleEffect(x: 1, y: 2, anchor: .center)
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(Formatters.money(abs(summary.remaining))).font(.display(24))
+                            Text(store.money(abs(summary.remaining))).font(.display(24))
                             Text(summary.isOverBudget ? "Over budget" : "Remaining").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,7 +176,7 @@ struct BudgetView: View {
                         Text("No season budget set, so this is the program budgets added up.")
                             .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
                     } else if overview.allocated > 0 {
-                        Text("\(Formatters.money(overview.allocated)) set aside for programs\(overview.isOverAllocated ? ", more than the season budget" : "").")
+                        Text("\(store.money(overview.allocated)) set aside for programs\(overview.isOverAllocated ? ", more than the season budget" : "").")
                             .font(.system(size: 12, weight: overview.isOverAllocated ? .semibold : .regular))
                             .foregroundStyle(overview.isOverAllocated ? theme.accentText : AppTheme.caption)
                     }
@@ -190,8 +192,34 @@ struct BudgetView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(theme.accentTint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                if store.displayCurrency != .cad {
+                    Text("Shown in US dollars at \(Formatters.rate(store.profile.usdToCAD)). Budgets and totals are kept in CAD.")
+                        .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                }
             }
         }
+    }
+
+    /// Shows the budget in CAD or USD, and sets the exchange rate.
+    private var currencyMenu: some View {
+        @Bindable var store = store
+        return Menu {
+            Picker("Show amounts in", selection: $store.displayCurrency) {
+                Text("Canadian dollars (CAD)").tag(Currency.cad)
+                Text("US dollars (USD)").tag(Currency.usd)
+            }
+            Button { showRateEditor = true } label: {
+                Label("Exchange rate: \(Formatters.rate(store.profile.usdToCAD))", systemImage: "arrow.left.arrow.right")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("· in \(store.displayCurrency.rawValue)")
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(AppTheme.muted)
+        }
+        .accessibilityLabel("Amounts in \(store.displayCurrency.rawValue). Change currency or exchange rate")
     }
 
     // MARK: - Trips
@@ -241,10 +269,10 @@ struct BudgetView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Formatters.money(summary.spent)).font(.system(size: 15, weight: .semibold))
+                Text(store.money(summary.spent)).font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(summary.isOverBudget ? theme.accentText : AppTheme.ink)
                 if trip.budget > 0 {
-                    Text("of \(Formatters.money(trip.budget))").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                    Text("of \(store.money(trip.budget))").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
                 }
             }
             Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron)
@@ -278,7 +306,7 @@ struct BudgetView: View {
                 HStack {
                     Text(line.program?.name ?? "Not for a program").font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
                     Spacer()
-                    Text(Formatters.money(line.spent)).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                    Text(store.money(line.spent)).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
                 }
                 if line.budget > 0 {
                     GeometryReader { proxy in
@@ -293,8 +321,8 @@ struct BudgetView: View {
                 HStack {
                     Text(line.expenseCount == 1 ? "1 expense" : "\(line.expenseCount) expenses")
                     Spacer()
-                    Text(line.budget > 0 ? (line.isOverBudget ? "\(Formatters.money(-line.remaining)) over \(Formatters.money(line.budget))"
-                                                              : "\(Formatters.money(line.remaining)) left of \(Formatters.money(line.budget))")
+                    Text(line.budget > 0 ? (line.isOverBudget ? "\(store.money(-line.remaining)) over \(store.money(line.budget))"
+                                                              : "\(store.money(line.remaining)) left of \(store.money(line.budget))")
                                          : (line.program == nil ? "" : "No budget"))
                         .foregroundStyle(line.isOverBudget ? theme.accentText : AppTheme.caption)
                 }
@@ -314,7 +342,7 @@ struct BudgetView: View {
             HStack {
                 Text(row.category.title).font(.system(size: 15, weight: .semibold))
                 Spacer()
-                Text(Formatters.money(row.amount)).font(.system(size: 15, weight: .semibold))
+                Text(store.money(row.amount)).font(.system(size: 15, weight: .semibold))
             }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {

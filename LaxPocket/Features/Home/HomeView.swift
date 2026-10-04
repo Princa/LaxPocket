@@ -40,7 +40,7 @@ struct HomeView: View {
                             StatTile(value: record.line, caption: "Game record")
                         }
                         Button { store.selectedTab = .budget } label: {
-                            StatTile(value: Formatters.money(budget.spent), caption: "Spent · \(Int((budget.fractionUsed * 100).rounded()))%")
+                            StatTile(value: store.money(budget.spent), caption: "Spent · \(Int((budget.fractionUsed * 100).rounded()))%")
                         }
                     }
                     .buttonStyle(.plain)

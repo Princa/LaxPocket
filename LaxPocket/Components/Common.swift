@@ -353,8 +353,30 @@ enum Formatters {
         return f
     }()
 
+    static let usd: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        f.currencySymbol = "US$"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
     static func money(_ value: Double) -> String {
         currency.string(from: NSNumber(value: value)) ?? "$\(Int(value))"
+    }
+
+    /// "$1,850" in Canadian dollars, "US$500" in US dollars.
+    static func money(_ value: Double, currency code: Currency) -> String {
+        switch code {
+        case .cad: return money(value)
+        case .usd: return usd.string(from: NSNumber(value: value)) ?? "US$\(Int(value))"
+        }
+    }
+
+    /// "1 USD = 1.38 CAD".
+    static func rate(_ usdToCAD: Double) -> String {
+        "1 USD = \(usdToCAD.formatted(.number.precision(.fractionLength(2...4)))) CAD"
     }
 
     static func hours(_ value: Double) -> String {

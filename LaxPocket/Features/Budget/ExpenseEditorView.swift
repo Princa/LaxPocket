@@ -1,7 +1,8 @@
 import SwiftUI
 import LaxPocketCore
 
-/// Adds an expense, or edits one: what it was, the amount, the program, season and trip it counts toward, and notes.
+/// Adds an expense, or edits one: what it was, the amount and the currency it was paid in, the program, season and trip
+/// it counts toward, and notes. An amount paid in US dollars is converted to CAD at the exchange rate.
 struct ExpenseEditorView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -9,6 +10,9 @@ struct ExpenseEditorView: View {
     let expense: Expense?
     @State private var title: String
     @State private var amountText: String
+    @State private var currency: Currency
+    /// Canadian dollars per US dollar for this expense; starts at the athlete's rate.
+    @State private var rateText: String
     @State private var category: ExpenseCategory
     @State private var date: Date
     @State private var season: Int
@@ -24,7 +28,9 @@ struct ExpenseEditorView: View {
         self.expense = expense
         let date = expense?.date ?? Date()
         _title = State(initialValue: expense?.title ?? "")
-        _amountText = State(initialValue: expense.map { AmountText.string($0.amount) } ?? "")
+        _amountText = State(initialValue: expense.map { AmountText.string($0.paidAmount) } ?? "")
+        _currency = State(initialValue: expense?.currency ?? .cad)
+        _rateText = State(initialValue: expense?.exchangeRate.map(AmountText.rate) ?? "")
         _category = State(initialValue: expense?.category ?? category ?? (tripID != nil ? .tournamentFees : .coaching))
         _date = State(initialValue: date)
         _season = State(initialValue: expense?.season ?? season ?? AthleteProfile.seasonStart(for: date))
@@ -35,7 +41,15 @@ struct ExpenseEditorView: View {
     }
 
     private var isNew: Bool { expense == nil }
-    private var amount: Double? { AmountText.parse(amountText).flatMap { $0 >= 0 ? $0 : nil } }
+    /// What was paid, in `currency`.
+    private var paid: Double? { AmountText.parse(amountText).flatMap { $0 >= 0 ? $0 : nil } }
+    private var rate: Double? { AmountText.parse(rateText).flatMap { ExchangeRate.range.contains($0) ? $0 : nil } }
+    /// What counts toward the budget, in CAD.
+    private var amount: Double? {
+        guard let paid else { return nil }
+        if currency == .cad { return paid }
+        return rate.map { ExchangeRate.cad(paid, in: currency, rate: $0) }
+    }
     private var program: Program? { programID.flatMap(store.program) }
     private var trip: Trip? { tripID.flatMap(store.trip) }
 
@@ -60,7 +74,26 @@ struct ExpenseEditorView: View {
             Form {
                 Section {
                     TextField(tripID == nil ? "What was it? e.g. Spring season fee" : "What was it? e.g. Hotel, 2 nights", text: $title)
-                    TextField("Amount (CAD)", text: $amountText).keyboardType(.decimalPad)
+                    Picker("Paid in", selection: $currency) {
+                        ForEach(Currency.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Amount (\(currency.rawValue))", text: $amountText).keyboardType(.decimalPad)
+                    if currency != .cad {
+                        LabeledContent("Rate") {
+                            HStack(spacing: 4) {
+                                Text("1 \(currency.rawValue) =").foregroundStyle(AppTheme.caption)
+                                TextField("1.38", text: $rateText)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 80)
+                                Text("CAD").foregroundStyle(AppTheme.caption)
+                            }
+                        }
+                        LabeledContent("In CAD") {
+                            Text(amount.map { $0.formatted(.currency(code: "CAD")) } ?? "—").fontWeight(.semibold)
+                        }
+                    }
                     Picker("Category", selection: $category) {
                         ForEach(ExpenseCategory.allCases) { Text($0.title).tag($0) }
                     }
@@ -112,6 +145,9 @@ struct ExpenseEditorView: View {
             }
             .onAppear {
                 if isNew, !keepsCategory, let program { category = .suggested(for: program.group) }
+                // Costs on a trip to the US are usually in US dollars.
+                if isNew, trip?.isInUS == true { currency = .usd }
+                if rateText.isEmpty { rateText = AmountText.rate(store.profile.usdToCAD) }
             }
             .onChange(of: date) { old, new in
                 // The season follows the date until it's picked by hand.
@@ -124,6 +160,7 @@ struct ExpenseEditorView: View {
                 // A trip's costs count toward its season and, unless picked, its program.
                 guard isNew, let trip else { return }
                 season = trip.season
+                if trip.isInUS, paid == nil { currency = .usd }
                 if programID == nil { programID = trip.programID.flatMap(store.program)?.id }
             }
             .confirmationDialog("Delete this expense?", isPresented: $confirmDelete, titleVisibility: .visible) {
@@ -147,7 +184,8 @@ struct ExpenseEditorView: View {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         store.saveExpense(Expense(id: expense?.id ?? UUID(), date: date, title: trimmed.isEmpty ? (program?.name ?? category.title) : trimmed,
                                   category: category, amount: amount, note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                                  programID: program?.id, season: season, tripID: trip?.id))
+                                  programID: program?.id, season: season, tripID: trip?.id,
+                                  currency: currency, originalAmount: currency == .cad ? nil : paid))
         dismiss()
     }
 }
