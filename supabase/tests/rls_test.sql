@@ -103,6 +103,17 @@ begin
 end
 $$;
 
+-- The NDTP age group is optional.
+insert into public.profiles (id, first_name) values ('10000000-0000-4000-8000-000000000003', 'No NDTP');
+do $$
+begin
+  assert (select benchmark_group is null from public.profiles where id = '10000000-0000-4000-8000-000000000003'),
+    'a profile has no NDTP group unless one is picked';
+  assert (select benchmark_group from public.profiles where id = '10000000-0000-4000-8000-000000000001') = 'u15Women', 'a picked group stays';
+end
+$$;
+delete from public.profiles where id = '10000000-0000-4000-8000-000000000003';
+
 -- Can't create a profile on someone else's behalf.
 do $$
 declare failed boolean := false;

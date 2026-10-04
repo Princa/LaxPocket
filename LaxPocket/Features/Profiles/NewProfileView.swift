@@ -8,7 +8,8 @@ struct NewProfileView: View {
     @State private var firstName = ""
     @State private var classYear: Int?
     @State private var positions = ""
-    @State private var group: BenchmarkGroup = .u15Women
+    /// Nil unless they're on an NDTP team.
+    @State private var ndtpGroup: BenchmarkGroup?
     @State private var season = AthleteProfile.seasonLabel(for: Date())
     @State private var weeklyGoal = 12.0
     @State private var themeID = ThemeCatalog.defaultID
@@ -28,13 +29,8 @@ struct NewProfileView: View {
                     TextField("Class of", value: $classYear, format: .number.grouping(.never))
                         .keyboardType(.numberPad)
                     TextField("Positions, e.g. Midfield / Attack", text: $positions)
-                    Picker("NDTP standards", selection: $group) {
-                        ForEach(BenchmarkGroup.allCases) { Text($0.title).tag($0) }
-                    }
                 } header: {
                     Text("Athlete")
-                } footer: {
-                    Text("Combine results are scored against these NDTP standards.")
                 }
 
                 Section {
@@ -44,10 +40,11 @@ struct NewProfileView: View {
                     Button { clubs.append("") } label: {
                         Label("Add another team", systemImage: "plus")
                     }
+                    NDTPPicker(group: $ndtpGroup)
                 } header: {
                     Text("Clubs & teams")
                 } footer: {
-                    Text("Optional. Add every team they play for. Coaches, gyms and more teams can be added later from the profile.")
+                    Text("Optional. Add every team they play for. On an NDTP team, NDTP is added as a team and combine results are scored against that age group's standards. Coaches, gyms and more teams can be added later from the profile.")
                 }
 
                 BodyInputFields(input: $bodyInput, footer: "Optional. Saved as today’s measurement; log more from Home → Health to track growth.")
@@ -82,7 +79,7 @@ struct NewProfileView: View {
     private func create() {
         let profile = AthleteProfile(firstName: trimmedName, classYear: classYear,
                                      positions: positions.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     benchmarkGroup: group, weeklyGoalHours: weeklyGoal,
+                                     weeklyGoalHours: weeklyGoal,
                                      season: season.trimmingCharacters(in: .whitespacesAndNewlines), bodyUnits: bodyInput.units)
         var data = AppData.newProfile(profile, themeID: themeID)
         for club in clubs {
@@ -91,11 +88,24 @@ struct NewProfileView: View {
             data.programs.append(Program(id: Program.newID(), name: name, detail: "", group: .teams, sessionCategory: .team,
                                          monogram: Program.suggestedMonogram(for: name)))
         }
+        data.setNDTPGroup(ndtpGroup)
         if !bodyInput.isBlank && !bodyInput.hasError {
             data.bodyMeasurements = [bodyInput.applied(to: BodyMeasurement(date: Date()))]
         }
         store.createProfile(data)
         dismiss()
+    }
+}
+
+/// Whether the athlete is on an NDTP team, and in which age group. Off by default.
+struct NDTPPicker: View {
+    @Binding var group: BenchmarkGroup?
+
+    var body: some View {
+        Picker("NDTP team", selection: $group) {
+            Text("None").tag(BenchmarkGroup?.none)
+            ForEach(BenchmarkGroup.allCases) { Text($0.title).tag(BenchmarkGroup?.some($0)) }
+        }
     }
 }
 

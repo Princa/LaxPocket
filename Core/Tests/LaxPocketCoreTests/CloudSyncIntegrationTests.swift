@@ -115,6 +115,7 @@ final class CloudSyncIntegrationTests: XCTestCase {
         hotel.setPaid(410.5, in: .usd, rate: 1.3725)
         tabletData.expenses.append(hotel)
         tabletData.profile.usdToCAD = 1.3725
+        tabletData.profile.benchmarkGroup = nil
 
         phoneBase = try await phone.sync(local: phoneData, base: phoneBase)
         tabletBase = try await tablet.sync(local: tabletData, base: tabletBase)
@@ -133,6 +134,7 @@ final class CloudSyncIntegrationTests: XCTestCase {
         XCTAssertEqual(usHotel.paidAmount, 410.5)
         XCTAssertEqual(usHotel.amount, 563.41)
         XCTAssertEqual(final.profile.usdToCAD, 1.3725)
+        XCTAssertNil(final.profile.benchmarkGroup, "taking the athlete off NDTP clears the group in the cloud")
         XCTAssertEqual(final.expenses.first { $0.programID == "club" && $0.season == 2026 }?.note, "Paid by e-transfer")
         XCTAssertEqual(final.expenses.first { $0.category == .food }?.tripID, season.trips[0].id)
         XCTAssertEqual(final.trips.map(\.name), ["Fall showcase", "Spring tournament"])

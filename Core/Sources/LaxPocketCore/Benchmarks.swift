@@ -209,6 +209,31 @@ public struct TierAssessment: Equatable, Sendable {
     public var thresholds: TierThresholds
 }
 
+extension AppData {
+    /// The program the NDTP team is kept as, alongside the athlete's other teams.
+    public static let ndtpProgramID = "ndtp"
+
+    /// The athlete's NDTP team, if they're on one.
+    public var ndtpProgram: Program? {
+        programs.first { $0.id == AppData.ndtpProgramID }
+    }
+
+    /// Puts the athlete on an NDTP team in an age group, or takes them off with nil. Being on one adds NDTP to their
+    /// teams (so its camps and sessions can be logged) and scores combine results against that group's standards.
+    /// Taking them off keeps the team, which may have sessions logged with it.
+    public mutating func setNDTPGroup(_ group: BenchmarkGroup?) {
+        profile.benchmarkGroup = group
+        guard let group else { return }
+        let detail = "National Development Team Program · \(group.title)"
+        if let index = programs.firstIndex(where: { $0.id == AppData.ndtpProgramID }) {
+            programs[index].detail = detail
+        } else {
+            programs.append(Program(id: AppData.ndtpProgramID, name: "NDTP", detail: detail, group: .teams, sessionCategory: .team,
+                                    monogram: "ND"))
+        }
+    }
+}
+
 /// NDTP 2026 Fitness Standards Guide — Future Track Physical Performance Standards, version 1.0 (July 2026).
 public enum NDTPStandards {
     public static let source = "NDTP 2026 Fitness Standards Guide v1.0 (July 2026)"
