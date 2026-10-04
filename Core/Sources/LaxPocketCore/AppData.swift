@@ -74,9 +74,13 @@ public struct AppData: Codable, Equatable, Sendable {
     public var docs: [MentalDoc]
     /// Height and weight checks. They belong to the athlete, so a blank season keeps them.
     public var bodyMeasurements: [BodyMeasurement]
+    /// Drills the athlete added, and built-in drills the athlete changed. Built-ins left as they are aren't stored.
+    public var wallballDrills: [WallballDrill]
+    public var wallballSessions: [WallballSession]
     public var themeID: String
 
-    public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [], themeID: String = ThemeCatalog.defaultID) {
+    public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [],
+                wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -88,11 +92,13 @@ public struct AppData: Codable, Equatable, Sendable {
         self.seasonBudget = seasonBudget
         self.docs = docs
         self.bodyMeasurements = bodyMeasurements
+        self.wallballDrills = wallballDrills
+        self.wallballSessions = wallballSessions
         self.themeID = themeID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, bodyMeasurements, themeID
+        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudget, docs, bodyMeasurements, wallballDrills, wallballSessions, themeID
     }
 
     /// Reads current files and version 1 season files, which had no `id`.
@@ -109,6 +115,8 @@ public struct AppData: Codable, Equatable, Sendable {
         seasonBudget = try c.decodeIfPresent(Double.self, forKey: .seasonBudget) ?? 0
         docs = try c.decodeIfPresent([MentalDoc].self, forKey: .docs) ?? []
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurement].self, forKey: .bodyMeasurements) ?? []
+        wallballDrills = try c.decodeIfPresent([WallballDrill].self, forKey: .wallballDrills) ?? []
+        wallballSessions = try c.decodeIfPresent([WallballSession].self, forKey: .wallballSessions) ?? []
         themeID = try c.decodeIfPresent(String.self, forKey: .themeID) ?? ThemeCatalog.defaultID
     }
 
@@ -137,6 +145,15 @@ public struct AppData: Codable, Equatable, Sendable {
         combineResults.max { $0.date < $1.date }
     }
 
+    /// Every wall ball drill: the built-in routine with the athlete's changes, then the athlete's own drills.
+    public var wallballLibrary: [WallballDrill] {
+        WallballCatalog.library(wallballDrills)
+    }
+
+    public func wallballDrill(id: String) -> WallballDrill? {
+        wallballDrills.first { $0.id == id } ?? WallballCatalog.builtIn(id: id)
+    }
+
     /// Hours logged with each program across the season.
     public var hoursByProgram: [String: Double] {
         var totals: [String: Double] = [:]
@@ -151,10 +168,11 @@ public struct AppData: Codable, Equatable, Sendable {
         return counts
     }
 
-    /// A clean season for the same athlete: keeps the profile, programs, budget, height and weight history and theme,
-    /// drops the season's logged data.
+    /// A clean season for the same athlete: keeps the profile, programs, budget, height and weight history, wall ball drills
+    /// and theme, drops the season's logged data.
     public func blankSeason() -> AppData {
-        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, bodyMeasurements: bodyMeasurements, themeID: themeID)
+        AppData(id: id, profile: profile, programs: programs, seasonBudget: seasonBudget, bodyMeasurements: bodyMeasurements,
+                wallballDrills: wallballDrills, themeID: themeID)
     }
 
     public static let encoder: JSONEncoder = {

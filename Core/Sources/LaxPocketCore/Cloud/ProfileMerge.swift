@@ -25,6 +25,8 @@ public struct SyncChanges: Hashable, Sendable {
     public var expenses = TableChanges<ExpenseRow, UUID>()
     public var docs = TableChanges<MentalDocRow, UUID>()
     public var bodyMeasurements = TableChanges<BodyMeasurementRow, UUID>()
+    public var wallballDrills = TableChanges<WallballDrillRow, String>()
+    public var wallballSessions = TableChanges<WallballBundle, UUID>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -32,7 +34,7 @@ public struct SyncChanges: Hashable, Sendable {
 
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
-            && bodyMeasurements.isEmpty
+            && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty
     }
 }
 
@@ -44,7 +46,7 @@ public struct SyncChanges: Hashable, Sendable {
 /// - Changed on both sides → this device wins.
 /// - Deleted on one side, edited on the other → the edit wins, so nothing typed in is lost.
 ///
-/// An event or a testing day merges as one unit with everything under it.
+/// An event, a testing day or a wall ball session merges as one unit with everything under it.
 public enum ProfileMerge {
     public struct Outcome: Hashable, Sendable {
         /// What both sides hold once `changes` are written. Becomes the new local data and the new base.
@@ -65,6 +67,8 @@ public enum ProfileMerge {
             changes.expenses.upserts = local.expenses
             changes.docs.upserts = local.docs
             changes.bodyMeasurements.upserts = local.bodyMeasurements
+            changes.wallballDrills.upserts = local.wallballDrills
+            changes.wallballSessions.upserts = local.wallballSessions
             return Outcome(merged: local, changes: changes)
         }
 
@@ -88,10 +92,14 @@ public enum ProfileMerge {
         changes.docs = TableChanges(upserts: docs.upserts, deletes: docs.deletes)
         let body = rows(base: base?.bodyMeasurements ?? [], local: local.bodyMeasurements, remote: remote.bodyMeasurements, key: \.id)
         changes.bodyMeasurements = TableChanges(upserts: body.upserts, deletes: body.deletes)
+        let drills = rows(base: base?.wallballDrills ?? [], local: local.wallballDrills, remote: remote.wallballDrills, key: \.id)
+        changes.wallballDrills = TableChanges(upserts: drills.upserts, deletes: drills.deletes)
+        let wallball = rows(base: base?.wallballSessions ?? [], local: local.wallballSessions, remote: remote.wallballSessions, key: \.id)
+        changes.wallballSessions = TableChanges(upserts: wallball.upserts, deletes: wallball.deletes)
 
         let merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
                                      combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
-                                     bodyMeasurements: body.merged)
+                                     bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged)
         return Outcome(merged: merged, changes: changes)
     }
 

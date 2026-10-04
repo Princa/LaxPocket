@@ -49,9 +49,23 @@ enum Fixtures {
             BodyMeasurement(date: day(-30, hour: 8), heightCm: 159.8, weightKg: 47.85, note: "Check-up"),
             BodyMeasurement(date: day(0, hour: 8), weightKg: 48.1)
         ]
+        let drills = [
+            WallballDrill(id: "twister", name: "Twister", detail: "Spin out, catch on the turn", defaultReps: 15),
+            WallballDrill(id: "behind-the-back", name: "Behind the back", detail: "Release behind the head", defaultReps: 10, isHidden: true)
+        ]
+        let wallball = [
+            WallballSession(date: day(0, hour: 7), sets: [
+                WallballSet(drillID: "overhand", hand: .right, reps: 50), WallballSet(drillID: "overhand", hand: .left, reps: 40),
+                WallballSet(drillID: "switch-hands", hand: .both, reps: 30), WallballSet(drillID: "twister", hand: .left, reps: 15)
+            ], minutes: 20),
+            WallballSession(date: day(1, hour: 7), sets: [
+                WallballSet(drillID: "quick-sticks", hand: .right, reps: 41), WallballSet(drillID: "quick-sticks", hand: .left, reps: 33)
+            ], challengeSeconds: 30, notes: "Windy")
+        ]
         let profile = AthleteProfile(firstName: name, classYear: 2031, positions: "Midfield", benchmarkGroup: .u15Women,
                                      mentalCoachName: "Coach K", weeklyGoalHours: 12.5, season: "2026/27", bodyUnits: .metric)
         return AppData(profile: profile, programs: programs, sessions: sessions, combineResults: [combine], events: events,
-                       expenses: expenses, seasonBudget: 14_000, docs: docs, bodyMeasurements: body, themeID: "northwestern")
+                       expenses: expenses, seasonBudget: 14_000, docs: docs, bodyMeasurements: body,
+                       wallballDrills: drills, wallballSessions: wallball, themeID: "northwestern")
     }
 }

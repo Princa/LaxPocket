@@ -14,6 +14,7 @@ Built with SwiftUI for iOS 17+.
 | **Athlete profile** | **Home → Edit profile** (also in the athlete menu and Theme & settings). Name, class year, positions, NDTP group and mental coach; every club and team the athlete plays for (club, school, box, provincial), with games and hours for each; and height and weight. |
 | **Home** | This week's hours split into Team / Skills / Fitness against a weekly goal, a load ratio, season totals, what's up next, and showcase prep. |
 | **Training** | Weekly and season hours by category — team, skills, fitness and mental (Swift Charts), an acute : chronic workload gauge, and a session log. **Log session** captures program, duration, effort (RPE 1–10), focus tags and notes. Mental sessions (game plan, pre-game preparation, visualisation with the mental coach) have their own focus tags and count toward weekly hours but not the workload gauge, which tracks physical load. |
+| **Wall ball** | **Training → Wall ball**. Log each day's reps by drill and hand: the 15-drill routine (overhand, quick sticks, one-handed, cross-hand, behind the back, catch and switch…) is built in, and you can add your own, rename, hide or change default reps. **Pick all** with one number for every drill and hand, or set each one; **Same as last time** repeats the previous day. The dashboard shows today, the week, the streak and best day, reps per day or week stacked by hand, right-vs-left balance (flagged when one hand drops under 40%), reps by drill, and the log. A **timed challenge** runs picked drills against the clock (30 s to 2 min per drill and hand, right & left or one hand), with a countdown, optional tap-to-count, and bests per drill and hand for each round length. |
 | **Metrics** | Combine results scored against the **NDTP 2026 Fitness Standards** (Developing / Competitive / Elite) with the gap to the next tier, a comparison against the next age group, and a left-vs-right balance check. |
 | **Events** | Season record and totals, upcoming games and showcases, past events waiting for a score, and results. **Add / edit event** covers the score, stat line, video links, pre-game goals (hit / partly / missed), the post-game reflection with coach feedback, and a prep checklist. |
 | **Budget** | Spend against the season budget, by category, plus recent expenses. |
@@ -48,6 +49,7 @@ Core/                     LaxPocketCore Swift package: models and logic, no UI
     Season.swift          events, game stats, season record
     Budget.swift          expenses and budget summary
     Health.swift          height and weight log, units, growth rate
+    Wallball.swift        wall ball drills, reps by hand, streaks, trends, challenge bests
     MentalDocs.swift      Drive document links, type detection
     Themes.swift          11 palettes + WCAG contrast maths
     Profiles.swift        athlete profile list + one JSON file per athlete

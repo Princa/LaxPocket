@@ -217,6 +217,51 @@ final class AppStore {
         update { $0.bodyMeasurements.removeAll { ids.contains($0.id) } }
     }
 
+    /// Adds the wall ball session, or replaces the one with the same ID.
+    func saveWallballSession(_ session: WallballSession) {
+        update { data in
+            if let index = data.wallballSessions.firstIndex(where: { $0.id == session.id }) {
+                data.wallballSessions[index] = session
+            } else {
+                data.wallballSessions.append(session)
+            }
+        }
+    }
+
+    func deleteWallballSessions(_ ids: Set<UUID>) {
+        update { $0.wallballSessions.removeAll { ids.contains($0.id) } }
+    }
+
+    /// Saves a drill the athlete added or changed. A built-in put back the way it ships isn't stored.
+    func saveWallballDrill(_ drill: WallballDrill) {
+        update { data in
+            let index = data.wallballDrills.firstIndex { $0.id == drill.id }
+            if WallballCatalog.builtIn(id: drill.id) == drill {
+                if let index { data.wallballDrills.remove(at: index) }
+            } else if let index {
+                data.wallballDrills[index] = drill
+            } else {
+                data.wallballDrills.append(drill)
+            }
+        }
+    }
+
+    /// Only the athlete's own drills with no reps logged can be deleted; the rest can be hidden.
+    func canDeleteWallballDrill(_ id: String) -> Bool {
+        !WallballCatalog.builtInIDs.contains(id) && !data.wallballSessions.contains { $0.sets.contains { $0.drillID == id } }
+    }
+
+    func deleteWallballDrill(_ id: String) {
+        guard canDeleteWallballDrill(id) else { return }
+        update { $0.wallballDrills.removeAll { $0.id == id } }
+    }
+
+    /// Puts a built-in drill back the way it ships.
+    func resetWallballDrill(_ id: String) {
+        guard WallballCatalog.builtInIDs.contains(id) else { return }
+        update { $0.wallballDrills.removeAll { $0.id == id } }
+    }
+
     func setTheme(_ palette: ThemePalette) {
         update { $0.themeID = palette.id }
         applyAppIcon(for: palette)

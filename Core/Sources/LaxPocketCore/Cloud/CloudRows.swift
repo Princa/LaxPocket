@@ -315,6 +315,62 @@ public struct BodyMeasurementRow: CloudRow {
     }
 }
 
+public struct WallballDrillRow: CloudRow {
+    public static let table = "wallball_drills"
+    public static let columns = ["profile_id", "id", "name", "detail", "hands", "default_reps", "hidden", "sort_order"]
+    public static let conflictColumns = ["profile_id", "id"]
+
+    public var profileID: UUID
+    public var id: String
+    public var name: String
+    public var detail: String
+    public var hands: DrillHands
+    public var defaultReps: Int
+    public var hidden: Bool
+    public var sortOrder: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, detail, hands, hidden
+        case profileID = "profile_id", defaultReps = "default_reps", sortOrder = "sort_order"
+    }
+}
+
+public struct WallballSessionRow: CloudRow {
+    public static let table = "wallball_sessions"
+    public static let columns = ["id", "profile_id", "done_at", "minutes", "challenge_seconds", "notes"]
+    public static let conflictColumns = ["id"]
+
+    public var id: UUID
+    public var profileID: UUID
+    public var doneAt: Timestamp
+    public var minutes: Int?
+    public var challengeSeconds: Int?
+    public var notes: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, minutes, notes
+        case profileID = "profile_id", doneAt = "done_at", challengeSeconds = "challenge_seconds"
+    }
+}
+
+public struct WallballSetRow: CloudRow {
+    public static let table = "wallball_sets"
+    public static let columns = ["session_id", "profile_id", "drill_id", "hand", "reps", "position"]
+    public static let conflictColumns = ["session_id", "drill_id", "hand"]
+
+    public var sessionID: UUID
+    public var profileID: UUID
+    public var drillID: String
+    public var hand: WallballHand
+    public var reps: Int
+    public var position: Int
+
+    enum CodingKeys: String, CodingKey {
+        case hand, reps, position
+        case sessionID = "session_id", profileID = "profile_id", drillID = "drill_id"
+    }
+}
+
 // MARK: - Groups that sync as one unit
 
 /// A testing day with its results. Changing any result re-sends the whole day.
@@ -339,6 +395,15 @@ public struct EventBundle: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID { event.id }
 }
 
+/// A wall ball session with its sets. Changing any set re-sends the whole session.
+public struct WallballBundle: Codable, Hashable, Identifiable, Sendable {
+    public var session: WallballSessionRow
+    /// In `position` order.
+    public var sets: [WallballSetRow]
+
+    public var id: UUID { session.id }
+}
+
 /// Everything stored for one athlete profile, as cloud rows.
 public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var profile: ProfileRow
@@ -349,9 +414,12 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var expenses: [ExpenseRow]
     public var docs: [MentalDocRow]
     public var bodyMeasurements: [BodyMeasurementRow]
+    public var wallballDrills: [WallballDrillRow]
+    public var wallballSessions: [WallballBundle]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
-                events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = []) {
+                events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
+                wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -360,13 +428,16 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.expenses = expenses
         self.docs = docs
         self.bodyMeasurements = bodyMeasurements
+        self.wallballDrills = wallballDrills
+        self.wallballSessions = wallballSessions
     }
 
     private enum CodingKeys: String, CodingKey {
-        case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements
+        case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions
     }
 
-    /// Sync records saved before height and weight tracking have no `bodyMeasurements`.
+    /// Sync records saved before height and weight tracking have no `bodyMeasurements`, and those saved before
+    /// wall ball have no `wallballDrills` or `wallballSessions`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfileRow.self, forKey: .profile)
@@ -377,6 +448,8 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         expenses = try c.decode([ExpenseRow].self, forKey: .expenses)
         docs = try c.decode([MentalDocRow].self, forKey: .docs)
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurementRow].self, forKey: .bodyMeasurements) ?? []
+        wallballDrills = try c.decodeIfPresent([WallballDrillRow].self, forKey: .wallballDrills) ?? []
+        wallballSessions = try c.decodeIfPresent([WallballBundle].self, forKey: .wallballSessions) ?? []
     }
 }
 
@@ -415,6 +488,29 @@ extension BodyMeasurementRow {
         if let value = weight, !BodyMeasurement.weightRangeKg.contains(value) { weight = nil }
         guard height != nil || weight != nil else { return nil }
         self.init(id: m.id, profileID: profileID, measuredAt: Timestamp(m.date), heightCm: height, weightKg: weight, note: m.note)
+    }
+}
+
+extension WallballDrillRow {
+    /// Kept to what the database accepts: a name, and default reps in range.
+    init(_ d: WallballDrill, profileID: UUID, sortOrder: Int) {
+        let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reps = WallballDrill.defaultRepsRange
+        self.init(profileID: profileID, id: d.id, name: name.isEmpty ? "Drill" : name, detail: d.detail, hands: d.hands,
+                  defaultReps: min(max(d.defaultReps, reps.lowerBound), reps.upperBound), hidden: d.isHidden, sortOrder: sortOrder)
+    }
+}
+
+extension WallballBundle {
+    /// One set per drill and hand, with reps in range. A time or challenge length the database wouldn't take is left out.
+    init(_ s: WallballSession, profileID: UUID) {
+        let minutes = s.minutes.flatMap { (1...1440).contains($0) ? $0 : nil }
+        let seconds = s.challengeSeconds.flatMap { WallballChallenge.secondsRange.contains($0) ? $0 : nil }
+        session = WallballSessionRow(id: s.id, profileID: profileID, doneAt: Timestamp(s.date), minutes: minutes,
+                                     challengeSeconds: seconds, notes: s.notes)
+        sets = WallballSession.normalized(s.sets).enumerated().map { index, set in
+            WallballSetRow(sessionID: s.id, profileID: profileID, drillID: set.drillID, hand: set.hand, reps: set.reps, position: index)
+        }
     }
 }
 
@@ -476,6 +572,8 @@ extension ProfileSnapshot {
                          status: d.status, docUpdatedAt: Timestamp(d.updatedAt), docUpdatedBy: d.updatedBy, note: d.note)
         }
         bodyMeasurements = data.bodyMeasurements.compactMap { BodyMeasurementRow($0, profileID: pid) }
+        wallballDrills = data.wallballDrills.enumerated().map { WallballDrillRow($1, profileID: pid, sortOrder: $0) }
+        wallballSessions = data.wallballSessions.map { WallballBundle($0, profileID: pid) }
     }
 
     // MARK: - Rows → app data
@@ -515,6 +613,14 @@ extension ProfileSnapshot {
             bodyMeasurements: bodyMeasurements.sorted { $0.measuredAt < $1.measuredAt }.map { r in
                 BodyMeasurement(id: r.id, date: r.measuredAt.date, heightCm: r.heightCm, weightKg: r.weightKg, note: r.note)
             },
+            wallballDrills: wallballDrills.sorted { ($0.sortOrder, $0.id) < ($1.sortOrder, $1.id) }.map { r in
+                WallballDrill(id: r.id, name: r.name, detail: r.detail, hands: r.hands, defaultReps: r.defaultReps, isHidden: r.hidden)
+            },
+            wallballSessions: wallballSessions.sorted { $0.session.doneAt < $1.session.doneAt }.map { b in
+                WallballSession(id: b.session.id, date: b.session.doneAt.date,
+                                sets: b.sets.sorted { $0.position < $1.position }.map { WallballSet(drillID: $0.drillID, hand: $0.hand, reps: $0.reps) },
+                                minutes: b.session.minutes, challengeSeconds: b.session.challengeSeconds, notes: b.session.notes)
+            },
             themeID: p.themeID
         )
     }
@@ -552,5 +658,6 @@ extension ProfileSnapshot {
             && Set(combineResults) == Set(other.combineResults) && Set(events) == Set(other.events)
             && Set(expenses) == Set(other.expenses) && Set(docs) == Set(other.docs)
             && Set(bodyMeasurements) == Set(other.bodyMeasurements)
+            && Set(wallballDrills) == Set(other.wallballDrills) && Set(wallballSessions) == Set(other.wallballSessions)
     }
 }

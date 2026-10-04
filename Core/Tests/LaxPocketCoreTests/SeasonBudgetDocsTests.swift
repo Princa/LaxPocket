@@ -121,6 +121,8 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(data.combineResults.first?.value(for: .gripLeft), 262)
         XCTAssertTrue(data.bodyMeasurements.isEmpty)
         XCTAssertEqual(data.profile.bodyUnits, .imperial)
+        XCTAssertTrue(data.wallballDrills.isEmpty)
+        XCTAssertTrue(data.wallballSessions.isEmpty)
     }
 
     func testBlankSeasonKeepsProfileAndPrograms() {
@@ -136,6 +138,8 @@ final class AppDataTests: XCTestCase {
         XCTAssertTrue(blank.docs.isEmpty)
         XCTAssertTrue(blank.combineResults.isEmpty)
         XCTAssertEqual(blank.bodyMeasurements, season.bodyMeasurements, "height and weight history belongs to the athlete, not the season")
+        XCTAssertEqual(blank.wallballDrills, season.wallballDrills, "drills are kept like programs")
+        XCTAssertTrue(blank.wallballSessions.isEmpty)
     }
 
     func testNewProfileStartsEmpty() {

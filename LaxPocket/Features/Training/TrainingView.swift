@@ -45,6 +45,8 @@ struct TrainingView: View {
                     .accessibilityLabel("Log a session")
                 }
 
+                WallballCard()
+
                 Picker("Range", selection: $range) {
                     ForEach(Range.allCases) { Text($0.rawValue).tag($0) }
                 }

@@ -55,6 +55,17 @@ values ('60000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-0000000
 insert into public.body_measurements (id, profile_id, measured_at, height_cm, weight_kg) values
   ('70000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '2026-06-01T12:00:00Z', 160.0, 48.5),
   ('70000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', '2026-09-28T12:00:00Z', null, 49.9);
+insert into public.wallball_drills (profile_id, id, name, hands, default_reps)
+values ('10000000-0000-4000-8000-000000000001', 'twister', 'Twister', 'each', 20);
+insert into public.wallball_sessions (id, profile_id, done_at, minutes)
+values ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '2026-09-28T16:00:00Z', 20);
+insert into public.wallball_sessions (id, profile_id, done_at, challenge_seconds)
+values ('80000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', '2026-09-29T16:00:00Z', 30);
+insert into public.wallball_sets (session_id, profile_id, drill_id, hand, reps, position) values
+  ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'overhand', 'right', 50, 0),
+  ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'overhand', 'left', 50, 1),
+  ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'switch-hands', 'both', 30, 2),
+  ('80000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'quick-sticks', 'right', 41, 0);
 
 -- The same upsert PostgREST runs for "resolution=merge-duplicates".
 insert into public.profiles (id, first_name) values ('10000000-0000-4000-8000-000000000001', 'Sam K')
@@ -75,6 +86,9 @@ begin
   assert (select count(*) from public.mental_docs) = 1, 'A sees docs';
   assert (select count(*) from public.body_measurements) = 2, 'A sees height and weight';
   assert (select body_units from public.profiles) = 'imperial', 'profiles default to imperial units';
+  assert (select count(*) from public.wallball_drills) = 1, 'A sees wall ball drills';
+  assert (select count(*) from public.wallball_sessions) = 2, 'A sees wall ball sessions';
+  assert (select sum(reps) from public.wallball_sets) = 171, 'A sees wall ball reps';
 end
 $$;
 
@@ -176,6 +190,46 @@ begin
   exception when check_violation then failed := true;
   end;
   assert failed, 'units are imperial or metric';
+
+  failed := false;
+  begin
+    insert into public.wallball_sets (session_id, profile_id, drill_id, hand, reps)
+    values ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'sidearm', 'right', 0);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a set has at least one rep';
+
+  failed := false;
+  begin
+    insert into public.wallball_sets (session_id, profile_id, drill_id, hand, reps)
+    values ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'sidearm', 'feet', 10);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'hands are right, left or both';
+
+  failed := false;
+  begin
+    insert into public.wallball_sets (session_id, profile_id, drill_id, hand, reps)
+    values ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'overhand', 'right', 10);
+  exception when unique_violation then failed := true;
+  end;
+  assert failed, 'one set per drill and hand in a session';
+
+  failed := false;
+  begin
+    insert into public.wallball_sessions (profile_id, done_at, challenge_seconds)
+    values ('10000000-0000-4000-8000-000000000001', now(), 2);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'challenge rounds are at least 5 seconds';
+
+  failed := false;
+  begin
+    insert into public.wallball_drills (profile_id, id, name, hands)
+    values ('10000000-0000-4000-8000-000000000001', 'x', 'X', 'feet');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'drills are done with each hand or both together';
 end
 $$;
 
@@ -197,11 +251,23 @@ begin
   assert (select count(*) from public.season_events) = 0, 'B sees none of A''s events';
   assert (select count(*) from public.game_reflections) = 0, 'B sees none of A''s reflections';
   assert (select count(*) from public.body_measurements) = 0, 'B sees none of A''s height and weight';
+  assert (select count(*) from public.wallball_sessions) = 0, 'B sees none of A''s wall ball';
+  assert (select count(*) from public.wallball_sets) = 0, 'B sees none of A''s wall ball reps';
   assert (select count(*) from public.profile_members) = 1, 'B sees only their own membership';
 
   update public.profiles set first_name = 'Hacked' where id = '10000000-0000-4000-8000-000000000001';
   delete from public.expenses where profile_id = '10000000-0000-4000-8000-000000000001';
   update public.body_measurements set weight_kg = 99 where profile_id = '10000000-0000-4000-8000-000000000001';
+  update public.wallball_sets set reps = 999 where profile_id = '10000000-0000-4000-8000-000000000001';
+  delete from public.wallball_drills where profile_id = '10000000-0000-4000-8000-000000000001';
+
+  failed := false;
+  begin
+    insert into public.wallball_sessions (profile_id, done_at)
+    values ('10000000-0000-4000-8000-000000000001', now());
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'B can''t log wall ball for A''s profile';
 
   failed := false;
   begin
@@ -259,6 +325,8 @@ begin
   assert (select first_name from public.profiles where id = '10000000-0000-4000-8000-000000000001') = 'Sam K', 'B''s update did nothing';
   assert (select count(*) from public.expenses) = 1, 'B''s delete did nothing';
   assert (select weight_kg from public.body_measurements where id = '70000000-0000-4000-8000-000000000001') = 48.5, 'B''s weight change did nothing';
+  assert (select sum(reps) from public.wallball_sets) = 171, 'B''s reps change did nothing';
+  assert (select count(*) from public.wallball_drills) = 1, 'B''s drill delete did nothing';
 end
 $$;
 
@@ -292,6 +360,7 @@ begin
   assert (select count(*) from public.programs where profile_id = '10000000-0000-4000-8000-000000000001') = 2, 'viewer reads programs';
   assert (select count(*) from public.game_stats) = 1, 'viewer reads stats';
   assert (select count(*) from public.body_measurements) = 2, 'viewer reads height and weight';
+  assert (select count(*) from public.wallball_sets) = 4, 'viewer reads wall ball reps';
   begin
     insert into public.expenses (profile_id, spent_at, category, amount)
     values ('10000000-0000-4000-8000-000000000001', now(), 'travel', 10);
@@ -343,6 +412,7 @@ begin
   assert (select count(*) from public.profiles) = 0, 'C sees no profiles';
   assert (select count(*) from public.expenses) = 0, 'C sees no expenses';
   assert (select count(*) from public.body_measurements) = 0, 'C sees no height and weight';
+  assert (select count(*) from public.wallball_sessions) = 0, 'C sees no wall ball';
   assert (select count(*) from public.profile_members) = 0, 'C sees no memberships';
 end
 $$;
@@ -405,7 +475,7 @@ begin
   foreach t in array array[
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
     'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
-    'body_measurements', 'profile_members'
+    'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'profile_members'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);
