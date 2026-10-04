@@ -13,6 +13,9 @@ struct BudgetView: View {
     @State private var showTripEditor = false
     @State private var showRateEditor = false
 
+    /// An athlete's own login sees the budget but doesn't change it.
+    private var canEdit: Bool { store.data.canWrite(.budget) }
+
     var body: some View {
         let data = store.data
         let current = data.profile.currentSeason(now: store.now)
@@ -62,7 +65,8 @@ struct BudgetView: View {
 
                 if expenses.isEmpty {
                     Card {
-                        Text("No expenses for \(AthleteProfile.seasonLabel(start: season)) yet. Tap + to add fees, coaching, travel or gear.")
+                        Text(canEdit ? "No expenses for \(AthleteProfile.seasonLabel(start: season)) yet. Tap + to add fees, coaching, travel or gear."
+                                     : "No expenses for \(AthleteProfile.seasonLabel(start: season)) yet.")
                             .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
                     }
                 } else {
@@ -73,14 +77,17 @@ struct BudgetView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 14)
+                            .allowsHitTesting(canEdit)
                             .contextMenu {
-                                Button { editing = ExpenseEditTarget(expense: expense, season: season) } label: { Label("Edit", systemImage: "pencil") }
-                                Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
+                                if canEdit {
+                                    Button { editing = ExpenseEditTarget(expense: expense, season: season) } label: { Label("Edit", systemImage: "pencil") }
+                                    Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
+                                }
                             }
                             if index < recent.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
-                    Text("Tap an expense to change it or add notes.")
+                    Text(canEdit ? "Tap an expense to change it or add notes." : "A parent keeps the budget up to date.")
                         .font(.system(size: 12)).foregroundStyle(AppTheme.caption).padding(.horizontal, 4)
                 }
             }
@@ -123,14 +130,16 @@ struct BudgetView: View {
                 }
             }
             Spacer()
-            Button { editing = ExpenseEditTarget(season: season) } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(theme.primary, in: Circle())
+            if canEdit {
+                Button { editing = ExpenseEditTarget(season: season) } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(theme.primary, in: Circle())
+                }
+                .accessibilityLabel("Add an expense")
             }
-            .accessibilityLabel("Add an expense")
         }
     }
 
@@ -149,12 +158,14 @@ struct BudgetView: View {
                         }
                     }
                     Spacer()
-                    Button { showBudgetEditor = true } label: {
-                        Label(summary.budget > 0 ? "Edit budget" : "Set budget", systemImage: "pencil")
-                            .font(.system(size: 13, weight: .semibold))
+                    if canEdit {
+                        Button { showBudgetEditor = true } label: {
+                            Label(summary.budget > 0 ? "Edit budget" : "Set budget", systemImage: "pencil")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(theme.primary)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(theme.primary)
                 }
                 if summary.budget > 0 {
                     ProgressView(value: min(summary.fractionUsed, 1))
@@ -208,8 +219,10 @@ struct BudgetView: View {
                 Text("Canadian dollars (CAD)").tag(Currency.cad)
                 Text("US dollars (USD)").tag(Currency.usd)
             }
-            Button { showRateEditor = true } label: {
-                Label("Exchange rate: \(Formatters.rate(store.profile.usdToCAD))", systemImage: "arrow.left.arrow.right")
+            if canEdit {
+                Button { showRateEditor = true } label: {
+                    Label("Exchange rate: \(Formatters.rate(store.profile.usdToCAD))", systemImage: "arrow.left.arrow.right")
+                }
             }
         } label: {
             HStack(spacing: 4) {
@@ -228,8 +241,10 @@ struct BudgetView: View {
     private func tripsSection(season: Int, data: AppData) -> some View {
         let trips = data.trips(in: season)
         SectionHeader(title: "Tournament trips") {
-            Button { showTripEditor = true } label: { Label("Add trip", systemImage: "plus") }
-                .font(.system(size: 14, weight: .semibold))
+            if canEdit {
+                Button { showTripEditor = true } label: { Label("Add trip", systemImage: "plus") }
+                    .font(.system(size: 14, weight: .semibold))
+            }
         }
         .padding(.top, 8)
 

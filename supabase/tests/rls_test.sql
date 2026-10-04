@@ -1,7 +1,8 @@
 -- Row-level security and integrity checks for the LaxPocket schema.
 -- Run with supabase/tests/run-local.sh. Any failed assert stops the run.
 --
--- Accounts: A owns a profile, B is a second family member, C is a stranger.
+-- Accounts: A owns a profile, B is a second family member, C is a stranger. D (the athlete's own login) and E (a coach)
+-- join in the family accounts section, F (a team coach) and G (a mental coach) in the rosters section.
 
 \set ON_ERROR_STOP 1
 
@@ -657,6 +658,568 @@ end
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Family accounts: invites, relationships, sections and locked mental docs.
+-- D is the athlete's own login, E is a coach. B was shared the old way, so B is a parent.
+-- ---------------------------------------------------------------------------
+reset role;
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-00000000000d', 'd@example.com'),
+  ('00000000-0000-4000-8000-00000000000e', 'e@example.com');
+
+do $$
+begin
+  assert private.readable_sections('{coach,mentalCoach}') = '{events,mental,training}', 'sections add up across relationships';
+  assert private.writable_sections('{athlete}') = '{events,health,mental,training}', 'athletes don''t write the budget';
+  assert private.writable_sections('{coach}') = '{}', 'coaches write nothing';
+  assert (select relationships from public.profile_members
+          where profile_id = '10000000-0000-4000-8000-000000000001' and user_id = '00000000-0000-4000-8000-00000000000b') = '{parent}',
+    'members shared the old way are parents';
+end
+$$;
+
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000d';
+set role authenticated;
+insert into public.accounts (display_name, kind) values ('Sam', 'athlete');
+do $$
+declare failed boolean := false;
+begin
+  assert (select user_id from public.accounts) = '00000000-0000-4000-8000-00000000000d', 'an account sets itself up';
+  begin
+    insert into public.accounts (user_id, display_name, kind) values ('00000000-0000-4000-8000-00000000000e', 'Not me', 'coach');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'an account can''t set up someone else';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000e';
+set role authenticated;
+insert into public.accounts (display_name, kind) values ('Coach Kim', 'coach');
+
+-- The owner invites the athlete and a coach.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  perform set_config('test.athlete_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'athlete'), false);
+  perform set_config('test.coach_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'coach'), false);
+  assert current_setting('test.athlete_code') ~ '^[A-HJ-NP-Z2-9]{8}$', 'codes are 8 characters without look-alikes';
+  assert current_setting('test.athlete_code') <> current_setting('test.coach_code'), 'every invite has its own code';
+  assert (select count(*) from public.profile_invites) = 2, 'the owner sees their invites';
+  begin
+    perform public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'grandparent');
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'relationships are checked';
+  failed := false;
+  begin
+    perform public.accept_profile_invite(current_setting('test.athlete_code'));
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'the owner can''t accept their own invite';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000b';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'parent');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only the owner invites';
+  assert (select count(*) from public.profile_invites) = 0, 'only the owner sees invites';
+end
+$$;
+
+-- The athlete types the code in, in any case and with a dash.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000d';
+set role authenticated;
+do $$
+declare
+  code text := current_setting('test.athlete_code');
+  failed boolean := false;
+begin
+  assert public.accept_profile_invite(lower(left(code, 4)) || '-' || lower(right(code, 4))) = '10000000-0000-4000-8000-000000000001',
+    'accepting returns the athlete';
+  assert (select role = 'editor' and relationships = '{athlete}' from public.profile_members
+          where user_id = '00000000-0000-4000-8000-00000000000d'), 'the athlete is an editor';
+  assert (select relationships = '{athlete}' and role = 'editor' from public.my_profile_access), 'my_profile_access shows it';
+  begin
+    perform public.accept_profile_invite(code);
+  exception when no_data_found then failed := true;
+  end;
+  assert failed, 'a code works once';
+
+  assert (select count(*) from public.expenses) > 0, 'the athlete sees the budget';
+  assert (select count(*) from public.body_measurements) = 2, 'the athlete sees height and weight';
+  insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort)
+  values ('10000000-0000-4000-8000-000000000001', 'club', '2026-09-30T18:00:00Z', 'team', 60, 6);
+  insert into public.body_measurements (profile_id, measured_at, weight_kg)
+  values ('10000000-0000-4000-8000-000000000001', '2026-09-30T08:00:00Z', 50.1);
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount)
+    values ('10000000-0000-4000-8000-000000000001', now(), 'food', 12);
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'the athlete can''t add expenses';
+
+  failed := false;
+  begin
+    update public.profile_members set relationships = '{parent}' where user_id = '00000000-0000-4000-8000-00000000000d';
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'relationships only change through invites';
+end
+$$;
+
+-- The coach accepts; another account can't become a second athlete; old codes expire.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000e';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  perform public.accept_profile_invite(current_setting('test.coach_code'));
+  assert (select role = 'viewer' and relationships = '{coach}' from public.my_profile_access), 'coaches are viewers';
+  assert (select count(*) from public.programs where profile_id = '10000000-0000-4000-8000-000000000001') > 0, 'the coach sees programs';
+  assert (select count(*) from public.training_sessions) >= 2, 'the coach sees training';
+  assert (select count(*) from public.wallball_sets) = 4, 'the coach sees wall ball';
+  assert (select count(*) from public.combine_measurements) > 0, 'the coach sees combine results';
+  assert (select count(*) from public.season_events) > 0, 'the coach sees events';
+  assert (select count(*) from public.game_reflections) = 1, 'the coach sees reflections';
+  assert (select count(*) from public.expenses) = 0, 'the coach doesn''t see expenses';
+  assert (select count(*) from public.trips) = 0, 'the coach doesn''t see trips';
+  assert (select count(*) from public.season_budgets) + (select count(*) from public.program_budgets) = 0, 'the coach doesn''t see budgets';
+  assert (select count(*) from public.body_measurements) = 0, 'the coach doesn''t see height and weight';
+  assert (select count(*) from public.mental_docs) = 0, 'the coach doesn''t see mental docs';
+  assert (select count(*) from public.accounts) = 2, 'the coach sees the athlete''s name and their own';
+  begin
+    insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort)
+    values ('10000000-0000-4000-8000-000000000001', 'club', now(), 'team', 60, 6);
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'the coach can''t log training';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$ begin perform set_config('test.second_athlete_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'athlete'), false); end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.accounts) = 0, 'strangers see no accounts';
+  begin
+    perform public.accept_profile_invite(current_setting('test.second_athlete_code'));
+  exception when unique_violation then failed := true;
+  end;
+  assert failed, 'an athlete has one account';
+end
+$$;
+
+reset role;
+update public.profile_invites set expires_at = now() - interval '1 minute' where code = current_setting('test.second_athlete_code');
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.accept_profile_invite(current_setting('test.second_athlete_code'));
+  exception when no_data_found then failed := true;
+  end;
+  assert failed, 'expired codes don''t work';
+end
+$$;
+
+-- Locking: only the athlete locks; the parent then sees that the doc exists, not what it is.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    update public.mental_docs set visibility = 'locked' where id = '60000000-0000-4000-8000-000000000001';
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a parent can''t lock a doc';
+  failed := false;
+  begin
+    insert into public.mental_docs (profile_id, url, folder, kind, doc_updated_at, visibility)
+    values ('10000000-0000-4000-8000-000000000001', 'https://example.com/d', 'journal', 'link', now(), 'hidden');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a parent can''t add a hidden doc';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000d';
+set role authenticated;
+update public.mental_docs set visibility = 'locked' where id = '60000000-0000-4000-8000-000000000001';
+-- locked_by is always the athlete, whatever the app sends.
+insert into public.mental_docs (id, profile_id, title, url, folder, kind, doc_updated_at, visibility, locked_by)
+values ('60000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'Journal: tryouts',
+        'https://docs.google.com/document/d/j1', 'journal', 'googleDoc', '2026-09-29T21:00:00Z', 'hidden',
+        '00000000-0000-4000-8000-00000000000a');
+do $$
+begin
+  assert (select count(*) from public.mental_docs) = 2, 'the athlete sees their locked and hidden docs';
+  assert (select count(*) from public.mental_docs where locked_by = '00000000-0000-4000-8000-00000000000d') = 2, 'locked_by is the athlete';
+  assert (select count(*) from public.locked_mental_docs) = 0, 'the athlete gets full docs, not placeholders';
+  update public.mental_docs set title = 'Pre-game routine v2' where id = '60000000-0000-4000-8000-000000000001';
+  assert (select title from public.mental_docs where id = '60000000-0000-4000-8000-000000000001') = 'Pre-game routine v2',
+    'the athlete can still edit a locked doc';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+update public.mental_docs set title = 'Peek' where id = '60000000-0000-4000-8000-000000000001';
+delete from public.mental_docs where id = '60000000-0000-4000-8000-000000000001';
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.mental_docs) = 0, 'the parent doesn''t see locked or hidden docs';
+  assert (select count(*) from public.locked_mental_docs) = 1, 'the parent sees one placeholder: the hidden doc has none';
+  assert (select folder = 'routines' and doc_updated_at = '2026-09-22T12:00:00Z' from public.locked_mental_docs),
+    'the placeholder has the folder and date';
+  begin
+    -- What a sync's upsert would do with a stale copy of the doc.
+    insert into public.mental_docs (id, profile_id, title, url, folder, kind, doc_updated_at)
+    values ('60000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Peek',
+            'https://docs.google.com/document/d/abc', 'routines', 'word', '2026-09-22T12:00:00Z')
+    on conflict (id) do update set title = excluded.title;
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'the parent can''t overwrite a locked doc with an upsert';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000b';
+set role authenticated;
+do $$ begin assert (select count(*) from public.locked_mental_docs) = 1, 'the other parent sees the placeholder too'; end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000e';
+set role authenticated;
+do $$ begin assert (select count(*) from public.locked_mental_docs) = 0, 'the coach sees no placeholders'; end $$;
+
+reset role;
+do $$
+begin
+  assert (select title from public.mental_docs where id = '60000000-0000-4000-8000-000000000001') = 'Pre-game routine v2',
+    'the parent''s change did nothing';
+end
+$$;
+
+-- The parent unlinks the athlete's account and links another one as the athlete: the locked docs stay closed.
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+delete from public.profile_members
+where profile_id = '10000000-0000-4000-8000-000000000001' and user_id = '00000000-0000-4000-8000-00000000000d';
+do $$ begin perform set_config('test.new_athlete_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'athlete'), false); end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+begin
+  perform public.accept_profile_invite(current_setting('test.new_athlete_code'));
+  assert (select count(*) from public.mental_docs) = 0, 'a newly linked athlete can''t read docs someone else locked';
+  -- The row isn't visible to them, so this changes nothing (checked below).
+  update public.mental_docs set visibility = 'shared' where id = '60000000-0000-4000-8000-000000000001';
+end
+$$;
+
+reset role;
+do $$
+begin
+  assert (select visibility = 'locked' and locked_by = '00000000-0000-4000-8000-00000000000d' from public.mental_docs
+          where id = '60000000-0000-4000-8000-000000000001'), 'the doc stays locked by the original athlete';
+  -- Put things back for the checks below.
+  delete from public.profile_members
+  where profile_id = '10000000-0000-4000-8000-000000000001' and user_id = '00000000-0000-4000-8000-00000000000c';
+end
+$$;
+
+-- An athlete account that creates its own profile is its athlete and owner.
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000d';
+set role authenticated;
+insert into public.profiles (id, first_name) values ('10000000-0000-4000-8000-000000000004', 'Sam solo');
+do $$
+begin
+  assert (select role = 'owner' and relationships = '{athlete}' from public.my_profile_access
+          where profile_id = '10000000-0000-4000-8000-000000000004'), 'an athlete''s own profile';
+end
+$$;
+delete from public.profiles where id = '10000000-0000-4000-8000-000000000004';
+
+-- ---------------------------------------------------------------------------
+-- Coach rosters: F coaches a team, G is a mental coach. A (the owner) adds the athlete to both rosters.
+-- ---------------------------------------------------------------------------
+reset role;
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-00000000000f', 'f@example.com'),
+  ('00000000-0000-4000-8000-000000000010', 'g@example.com');
+-- A mental session, which only those who see the mental game should see.
+insert into public.programs (profile_id, id, name, program_group, session_category)
+values ('10000000-0000-4000-8000-000000000001', 'mindset', 'Mindset coach', 'mental', 'mental');
+insert into public.training_sessions (id, profile_id, program_id, started_at, category, minutes, effort, notes)
+values ('30000000-0000-4000-8000-000000000009', '10000000-0000-4000-8000-000000000001', 'mindset', '2026-09-25T17:00:00Z',
+        'mental', 45, 3, 'Nerves before tryouts');
+
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+insert into public.accounts (display_name, kind) values ('Coach Fay', 'coach');
+do $$
+declare failed boolean := false;
+begin
+  perform set_config('test.team_roster', public.create_roster(' U15 Girls ', 'team')::text, false);
+  assert (select name = 'U15 Girls' and kind = 'team' and join_code ~ '^[A-HJ-NP-Z2-9]{8}$' from public.rosters),
+    'a new roster has a name and a code';
+  perform set_config('test.team_code', (select join_code from public.rosters), false);
+  assert (select count(*) from public.roster_athlete_profiles) = 0, 'an empty roster has no athletes';
+  assert (select count(*) from public.training_sessions) = 0, 'the coach sees nothing before anyone joins';
+  begin
+    insert into public.rosters (kind, name) values ('team', 'Sneaky');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'rosters are made through create_roster';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+insert into public.accounts (display_name, kind) values ('Dr G', 'mentalCoach');
+do $$
+declare failed boolean := false;
+begin
+  perform set_config('test.mental_roster', public.create_roster('Clients', 'mental')::text, false);
+  perform set_config('test.mental_code', (select join_code from public.rosters), false);
+  assert (select count(*) from public.rosters) = 1, 'each coach sees only their own rosters';
+  begin
+    perform public.rename_roster(current_setting('test.team_roster')::uuid, 'Mine now');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only the roster''s coach renames it';
+end
+$$;
+
+-- Joining takes a parent.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.join_roster(current_setting('test.team_code'), '10000000-0000-4000-8000-000000000001');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a stranger can''t add the athlete to a roster';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000e';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.join_roster(current_setting('test.team_code'), '10000000-0000-4000-8000-000000000001');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a coach on the athlete can''t add them to another roster';
+  assert (select count(*) from public.training_sessions where category = 'mental') = 0, 'coaches don''t see mental sessions';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare
+  info jsonb;
+  failed boolean := false;
+begin
+  info := public.describe_code(lower(current_setting('test.team_code')));
+  assert info ->> 'type' = 'roster' and info ->> 'roster' = 'U15 Girls' and info ->> 'coach' = 'Coach Fay' and info ->> 'kind' = 'team',
+    'a roster code says whose roster it is';
+  assert public.join_roster(current_setting('test.team_code'), '10000000-0000-4000-8000-000000000001')
+    = current_setting('test.team_roster')::uuid, 'the owner adds the athlete';
+  perform public.join_roster(current_setting('test.team_code'), '10000000-0000-4000-8000-000000000001');
+  perform public.join_roster(current_setting('test.mental_code'), '10000000-0000-4000-8000-000000000001');
+  assert (select count(*) from public.roster_athletes) = 2, 'once per roster, and the family sees both';
+  assert (select count(*) from public.athlete_coaches('10000000-0000-4000-8000-000000000001')) = 2, 'the family sees both coaches';
+  begin
+    perform public.describe_code('ZZZZZZZZ');
+  exception when no_data_found then failed := true;
+  end;
+  assert failed, 'unknown codes';
+end
+$$;
+
+-- The team coach reads training (not mental sessions) and events, and nothing else.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert (select first_name from public.roster_athlete_profiles) = 'Sam', 'the coach sees the athlete''s name';
+  assert (select count(*) from public.training_sessions) > 0, 'the coach sees training';
+  assert (select count(*) from public.training_sessions where category = 'mental') = 0, 'but not mental sessions';
+  assert (select count(*) from public.wallball_sets) > 0, 'the coach sees wall ball';
+  assert (select count(*) from public.season_events) > 0 and (select count(*) from public.game_reflections) = 1, 'the coach sees events';
+  assert (select count(*) from public.expenses) + (select count(*) from public.trips) + (select count(*) from public.season_budgets) = 0,
+    'the coach doesn''t see the budget';
+  assert (select count(*) from public.body_measurements) = 0, 'the coach doesn''t see height and weight';
+  assert (select count(*) from public.mental_docs) + (select count(*) from public.locked_mental_docs) = 0, 'the coach doesn''t see mental docs';
+  assert (select count(*) from public.profiles) = 0, 'the coach reads the athlete through roster_athlete_profiles only';
+  assert (select count(*) from public.profile_members) = 0, 'the coach doesn''t see the family';
+  begin
+    insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort)
+    values ('10000000-0000-4000-8000-000000000001', 'club', now(), 'team', 60, 6);
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'the coach can''t log training';
+end
+$$;
+
+-- The mental coach sees shared docs and mental sessions, and a placeholder for the doc the athlete locked.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+do $$
+begin
+  assert (select count(*) from public.training_sessions where category = 'mental') = 1, 'the mental coach sees mental sessions';
+  assert (select count(*) from public.mental_docs) = 0, 'both docs are locked or hidden';
+  assert (select count(*) from public.locked_mental_docs) = 1, 'the locked one shows as a placeholder';
+end
+$$;
+
+-- The athlete's login (linked again) lets the mental coach open what it locked. Nobody else can do that for them.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.set_mental_coach_trust('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', true);
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a parent can''t open the athlete''s locked docs to anyone';
+  perform set_config('test.relink_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'athlete'), false);
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000d';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  perform public.accept_profile_invite(current_setting('test.relink_code'));
+  begin
+    perform public.set_mental_coach_trust('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000000f', true);
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'only a mental coach can be trusted';
+  perform public.set_mental_coach_trust('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', true);
+  assert (select can_open_locked from public.athlete_coaches('10000000-0000-4000-8000-000000000001') where kind = 'mental'),
+    'the athlete sees whom they trust';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+do $$
+begin
+  assert (select count(*) from public.mental_docs) = 1, 'the trusted mental coach opens the locked doc';
+  assert (select title from public.mental_docs) = 'Pre-game routine v2', 'with its title';
+  assert (select count(*) from public.locked_mental_docs) = 0, 'and gets no placeholder for it';
+  assert not exists (select 1 from public.mental_docs where visibility = 'hidden'), 'hidden stays the athlete''s';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+begin
+  assert (select count(*) from public.mental_docs) = 0 and (select count(*) from public.locked_mental_docs) = 1,
+    'the parent still sees only the placeholder';
+  assert not (select bool_or(can_open_locked) from public.athlete_coaches('10000000-0000-4000-8000-000000000001')),
+    'trust is the athlete''s, not the parent''s';
+end
+$$;
+
+-- Taking the athlete off a roster ends the coach's access; a new code stops the old one working.
+delete from public.roster_athletes where roster_id = current_setting('test.team_roster')::uuid;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$
+declare
+  failed boolean := false;
+  fresh text;
+begin
+  assert (select count(*) from public.training_sessions) = 0, 'off the roster, the coach sees nothing';
+  assert (select count(*) from public.roster_athlete_profiles) = 0, 'and the athlete is gone from the roster';
+  fresh := public.reset_roster_code(current_setting('test.team_roster')::uuid);
+  assert fresh <> current_setting('test.team_code'), 'a new code';
+  begin
+    perform public.describe_code(current_setting('test.team_code'));
+  exception when no_data_found then failed := true;
+  end;
+  assert failed, 'the old code stops working';
+  assert public.reset_roster_code(current_setting('test.team_roster')::uuid, false) is null, 'a roster can close to new athletes';
+end
+$$;
+
+-- The mental coach takes the athlete off their own roster: the trust stays, but opens nothing.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+delete from public.roster_athletes where roster_id = current_setting('test.mental_roster')::uuid;
+do $$
+begin
+  assert (select count(*) from public.mental_docs) = 0, 'off the roster, trust opens nothing';
+  assert (select count(*) from public.training_sessions) = 0, 'and the mental coach sees nothing';
+end
+$$;
+
+-- Put things back for the checks below: the athlete's login comes off again, and the mental session goes.
+reset role;
+delete from public.profile_members
+where profile_id = '10000000-0000-4000-8000-000000000001' and user_id = '00000000-0000-4000-8000-00000000000d';
+delete from public.training_sessions where id = '30000000-0000-4000-8000-000000000009';
+delete from public.programs where profile_id = '10000000-0000-4000-8000-000000000001' and id = 'mindset';
+
+-- ---------------------------------------------------------------------------
 -- Deleting a profile removes everything under it
 -- ---------------------------------------------------------------------------
 reset role;
@@ -700,7 +1263,7 @@ begin
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
     'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
     'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'season_budgets', 'program_budgets',
-    'trips', 'profile_members'
+    'trips', 'profile_members', 'profile_invites', 'roster_athletes', 'mental_coach_trust'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);

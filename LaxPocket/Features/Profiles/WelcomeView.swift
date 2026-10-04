@@ -5,6 +5,9 @@ import LaxPocketCore
 struct WelcomeView: View {
     @Environment(\.appTheme) private var theme
     @Environment(CloudStore.self) private var cloud
+    #if DEBUG
+    @Environment(AppStore.self) private var store
+    #endif
     @State private var showNew = false
     @State private var showCloud = false
 
@@ -37,10 +40,15 @@ struct WelcomeView: View {
                 .buttonStyle(PrimaryButtonStyle(color: theme.primary))
                 .padding(.top, 6)
                 if cloud.isConfigured {
-                    Button("Already use LaxPocket? Sign in to bring your athletes over") { showCloud = true }
+                    Button("Have an account or an invite code? Sign in") { showCloud = true }
                         .font(.system(size: 14, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                #if DEBUG
+                Button("Load the demo athlete") { store.loadDemoAthlete() }
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                #endif
             }
             .font(.system(size: 14))
             .foregroundStyle(AppTheme.ink2)

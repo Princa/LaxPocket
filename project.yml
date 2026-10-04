@@ -22,9 +22,13 @@ targets:
     type: application
     platform: iOS
     sources:
+      # A synchronized folder (Xcode 16+): Xcode picks up files added, renamed or removed under LaxPocket/ by itself,
+      # so they don't need the project regenerated. Only a change to this file does. XcodeGen leaves the generated
+      # Info.plist out of the app's resources.
       # Includes LaxPocket/Resources/Supabase.plist, which points the app at the LaxPocket
       # Supabase project; without it, cloud sync is off. See docs/supabase.md.
       - path: LaxPocket
+        type: syncedFolder
     dependencies:
       - package: LaxPocketCore
     # The signing team comes from Config/Local.xcconfig (not committed), so regenerating keeps it. See scripts/setup-mac.sh.

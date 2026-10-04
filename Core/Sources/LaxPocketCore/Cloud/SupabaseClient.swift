@@ -58,7 +58,11 @@ public enum CloudError: Error, Equatable, LocalizedError, Sendable {
         case .notSignedIn: return "Sign in to sync."
         case .invalidResponse: return "The server sent something unexpected."
         case .server(let status, let code, let message):
-            if code == "42501" { return "This account can’t change that athlete (view-only access)." }
+            if code == "42501" {
+                // LaxPocket's own functions explain themselves; row-level security's messages don't.
+                if !message.isEmpty, !message.hasPrefix("new row violates"), !message.hasPrefix("permission denied") { return message }
+                return "This account can’t change that athlete (view-only access)."
+            }
             if status == 401 { return "Signed out. Please sign in again." }
             return message.isEmpty ? "Server error \(status)." : message
         }
@@ -321,6 +325,11 @@ public actor SupabaseClient {
 
     /// Calls a Postgres function exposed through the API.
     public func rpc(_ function: String, params: [String: String]) async throws -> Data {
+        try await rpc(function, encoded: params)
+    }
+
+    /// Calls a Postgres function with parameters that aren't all text (booleans, say).
+    public func rpc<Params: Encodable & Sendable>(_ function: String, encoded params: Params) async throws -> Data {
         let (data, _) = try await rest("POST", "rpc/\(function)", body: try JSONEncoder().encode(params))
         return data
     }

@@ -11,6 +11,9 @@ struct ProgramBudgetView: View {
     @State private var editing: ExpenseEditTarget?
     @State private var showBudgetEditor = false
 
+    /// An athlete's own login sees the budget but doesn't change it.
+    private var canEdit: Bool { store.data.canWrite(.budget) }
+
     var body: some View {
         let data = store.data
         let program = programID.flatMap(store.program)
@@ -70,17 +73,20 @@ struct ProgramBudgetView: View {
                                 ExpenseListRow(expense: expense, showsProgram: false)
                             }
                             .buttonStyle(.plain)
+                            .allowsHitTesting(canEdit)
                             .padding(.horizontal, 14)
                             if index < expenses.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
                 }
 
-                Button { editing = ExpenseEditTarget(programID: programID, season: season) } label: {
-                    Label("Add expense", systemImage: "plus")
+                if canEdit {
+                    Button { editing = ExpenseEditTarget(programID: programID, season: season) } label: {
+                        Label("Add expense", systemImage: "plus")
+                    }
+                    .buttonStyle(PrimaryButtonStyle(color: theme.primary))
+                    .padding(.top, 8)
                 }
-                .buttonStyle(PrimaryButtonStyle(color: theme.primary))
-                .padding(.top, 8)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
@@ -88,7 +94,7 @@ struct ProgramBudgetView: View {
         .background(AppTheme.background)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if program != nil {
+            if program != nil && canEdit {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Budget") { showBudgetEditor = true }
                 }

@@ -10,6 +10,7 @@ struct CloudSyncView: View {
     @State private var isWorking = false
     @State private var message: String?
     @State private var showShare = false
+    @State private var showJoin = false
     @State private var pendingCloudDelete: ProfileRow?
     /// After creating an account, or signing in before confirming the email.
     @State private var awaitingConfirmation = false
@@ -35,6 +36,7 @@ struct CloudSyncView: View {
         .onDisappear { cloud.isShowingCloudSync = false }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showShare) { ShareAthleteView(summary: store.data.summary) }
+        .sheet(isPresented: $showJoin) { JoinAthleteView() }
         .confirmationDialog("Delete \(pendingCloudDelete?.firstName ?? "this athlete") from the cloud?",
                             isPresented: Binding(get: { pendingCloudDelete != nil }, set: { if !$0 { pendingCloudDelete = nil } }),
                             titleVisibility: .visible, presenting: pendingCloudDelete) { row in
@@ -118,6 +120,9 @@ struct CloudSyncView: View {
     private func signedIn(_ session: AuthSession) -> some View {
         Section {
             LabeledContent("Account", value: session.email ?? "Signed in")
+            if let account = cloud.account {
+                LabeledContent(account.displayName.isEmpty ? "You" : account.displayName, value: account.kind.title)
+            }
             HStack {
                 Text("Status")
                 Spacer()
@@ -135,6 +140,29 @@ struct CloudSyncView: View {
                 .disabled(cloud.isSyncing)
         } footer: {
             Text("Every athlete on this iPhone syncs automatically after changes and when the app opens. If the same thing was changed on two phones, this iPhone’s version is kept.")
+        }
+
+        if cloud.needsAccountSetup {
+            AccountSetupSection()
+        }
+
+        let lost = store.profiles.filter { cloud.noLongerShared.contains($0.id) }
+        if !lost.isEmpty {
+            Section {
+                ForEach(lost) { summary in
+                    HStack {
+                        ProfileAvatar(summary: summary, size: 32)
+                        Text(summary.displayName)
+                        Spacer()
+                        Button("Remove", role: .destructive) { cloud.removeFromThisPhone(summary.id) }
+                            .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("No longer shared with you")
+            } footer: {
+                Text("The owner took this account off these athletes, so they don’t sync any more. Remove them from this iPhone, or keep the copy here.")
+            }
         }
 
         if !cloud.remoteOnly.isEmpty {
@@ -159,11 +187,23 @@ struct CloudSyncView: View {
         }
 
         Section {
-            Button { showShare = true } label: {
-                Label("Share \(store.data.summary.displayName) with another account", systemImage: "person.badge.plus")
+            if store.hasProfile && store.data.id != DemoSeason.profileID {
+                NavigationLink { PeopleView(summary: store.data.summary) } label: {
+                    Label("People on \(store.data.summary.displayName)", systemImage: "person.2")
+                }
             }
+            Button { showJoin = true } label: {
+                Label("Join with a code", systemImage: "number")
+            }
+            if store.hasProfile && store.data.id != DemoSeason.profileID && (store.data.access?.canManagePeople ?? true) {
+                Button { showShare = true } label: {
+                    Label("Share \(store.data.summary.displayName) by email", systemImage: "envelope")
+                }
+            }
+        } header: {
+            Text("Family")
         } footer: {
-            Text("For a parent’s or coach’s phone with its own account. They need to create their account first.")
+            Text("Invite an athlete’s own login or another parent with a code, or join an athlete with a code a parent sent you. Sharing by email works for a parent who already has an account.")
         }
 
         Section {

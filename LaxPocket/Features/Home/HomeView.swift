@@ -3,6 +3,7 @@ import LaxPocketCore
 
 struct HomeView: View {
     @Environment(AppStore.self) private var store
+    @Environment(CloudStore.self) private var cloud
     @Environment(\.appTheme) private var theme
     @State private var showLogSession = false
     @State private var showSettings = false
@@ -39,8 +40,10 @@ struct HomeView: View {
                         Button { store.selectedTab = .events } label: {
                             StatTile(value: record.line, caption: "Game record")
                         }
-                        Button { store.selectedTab = .budget } label: {
-                            StatTile(value: store.money(budget.spent), caption: "Spent · \(Int((budget.fractionUsed * 100).rounded()))%")
+                        if data.canRead(.budget) {
+                            Button { store.selectedTab = .budget } label: {
+                                StatTile(value: store.money(budget.spent), caption: "Spent · \(Int((budget.fractionUsed * 100).rounded()))%")
+                            }
                         }
                     }
                     .buttonStyle(.plain)
@@ -52,15 +55,19 @@ struct HomeView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle(color: theme.primary))
 
-                    NavigationLink { MindsetView() } label: {
-                        mentalGameRow(docCount: data.docs.count, toReview: docsToReview)
+                    if data.canRead(.mental) {
+                        NavigationLink { MindsetView() } label: {
+                            mentalGameRow(docCount: data.docs.count + data.lockedDocs.count, toReview: docsToReview)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
-                    NavigationLink { HealthView() } label: {
-                        healthRow(growth: BodyTrends.growthRate(data.bodyMeasurements))
+                    if data.canRead(.health) {
+                        NavigationLink { HealthView() } label: {
+                            healthRow(growth: BodyTrends.growthRate(data.bodyMeasurements))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     if !upcoming.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
@@ -162,6 +169,11 @@ struct HomeView: View {
             }
             Button { showProfile = true } label: { Label("Edit \(store.data.summary.displayName)’s profile", systemImage: "pencil") }
             Button { showNewProfile = true } label: { Label("Add athlete", systemImage: "person.badge.plus") }
+            if cloud.isCoaching {
+                Section {
+                    Button { store.showsCoaching = true } label: { Label("Coaching", systemImage: "person.3") }
+                }
+            }
         } label: {
             headerIcon(store.profiles.count > 1 ? "person.2" : "person")
         }
@@ -295,7 +307,7 @@ struct HomeView: View {
     }
 }
 
-private struct UpcomingRow: View {
+struct UpcomingRow: View {
     @Environment(\.appTheme) private var theme
     let event: SeasonEvent
 

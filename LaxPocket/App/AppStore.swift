@@ -15,6 +15,8 @@ final class AppStore {
     private(set) var index: ProfileIndex
     /// Which tab is showing (not saved).
     var selectedTab: AppTab = .home
+    /// A parent who also coaches is looking at Coaching rather than their own athletes.
+    var showsCoaching = false
     /// The currency the budget screens show amounts in, on this device. Amounts are stored and added up in CAD.
     var displayCurrency: Currency = AppStore.savedDisplayCurrency {
         didSet { UserDefaults.standard.set(displayCurrency.rawValue, forKey: AppStore.displayCurrencyKey) }
@@ -95,6 +97,20 @@ final class AppStore {
             print("LaxPocket: could not open profile – \(error)")
         }
     }
+
+    #if DEBUG
+    /// Adds the made-up demo athlete (or rebuilds it around today) and switches to it. Debug builds only; the demo
+    /// stays on this device and isn't a local change, so cloud sync never uploads it.
+    func loadDemoAthlete() {
+        let demo = DemoSeason.make(now: now)
+        data = demo
+        index.upsert(demo.summary)
+        index.activeProfileID = demo.id
+        selectedTab = .home
+        saveProfile()
+        saveIndex()
+    }
+    #endif
 
     /// Removes a profile and its data from this device. Switches to another profile if it was showing.
     func deleteProfile(_ id: UUID) {
@@ -272,6 +288,13 @@ final class AppStore {
     func setDocStatus(_ id: UUID, _ status: DocStatus) {
         update { data in
             if let index = data.docs.firstIndex(where: { $0.id == id }) { data.docs[index].status = status }
+        }
+    }
+
+    /// Only the athlete's own login can lock or hide a doc; the cloud refuses it from anyone else.
+    func setDocVisibility(_ id: UUID, _ visibility: DocVisibility) {
+        update { data in
+            if let index = data.docs.firstIndex(where: { $0.id == id }) { data.docs[index].visibility = visibility }
         }
     }
 

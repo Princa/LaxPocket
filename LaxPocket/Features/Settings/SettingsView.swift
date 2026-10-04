@@ -78,6 +78,19 @@ struct SettingsView: View {
                 } footer: {
                     Text("Each athlete’s data is stored separately on this iPhone\(cloud.isSignedIn ? " and synced to your cloud account" : ""). A blank season keeps \(store.data.summary.displayName)’s programs, budgets and expenses, profile, height and weight history and theme.")
                 }
+
+                #if DEBUG
+                Section {
+                    Button("Load demo athlete") {
+                        store.loadDemoAthlete()
+                        dismiss()
+                    }
+                } header: {
+                    Text("Demo data")
+                } footer: {
+                    Text("Debug builds only. Adds Maya, a made-up athlete with a full season around today, or rebuilds her if she’s already here. She stays on this iPhone and isn’t synced.")
+                }
+                #endif
             }
             .navigationTitle("Theme & settings")
             .navigationBarTitleDisplayMode(.inline)

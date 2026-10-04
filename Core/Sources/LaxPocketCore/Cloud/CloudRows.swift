@@ -404,7 +404,9 @@ public struct ProgramBudgetRow: CloudRow {
 
 public struct MentalDocRow: CloudRow {
     public static let table = "mental_docs"
-    public static let columns = ["id", "profile_id", "title", "url", "folder", "kind", "status", "doc_updated_at", "doc_updated_by", "note"]
+    /// `locked_by` is set by the database, never by the app.
+    public static let columns = ["id", "profile_id", "title", "url", "folder", "kind", "status", "doc_updated_at", "doc_updated_by", "note",
+                                 "visibility"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -417,10 +419,123 @@ public struct MentalDocRow: CloudRow {
     public var docUpdatedAt: Timestamp
     public var docUpdatedBy: String
     public var note: String
+    public var visibility: DocVisibility = .shared
 
     enum CodingKeys: String, CodingKey {
-        case id, title, url, folder, kind, status, note
+        case id, title, url, folder, kind, status, note, visibility
         case profileID = "profile_id", docUpdatedAt = "doc_updated_at", docUpdatedBy = "doc_updated_by"
+    }
+}
+
+extension MentalDocRow {
+    /// Sync records saved before locking have no `visibility`: those docs were shared.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(UUID.self, forKey: .id), profileID: try c.decode(UUID.self, forKey: .profileID),
+                  title: try c.decode(String.self, forKey: .title), url: try c.decode(String.self, forKey: .url),
+                  folder: try c.decode(DocFolder.self, forKey: .folder), kind: try c.decode(DocKind.self, forKey: .kind),
+                  status: try c.decode(DocStatus.self, forKey: .status), docUpdatedAt: try c.decode(Timestamp.self, forKey: .docUpdatedAt),
+                  docUpdatedBy: try c.decode(String.self, forKey: .docUpdatedBy), note: try c.decode(String.self, forKey: .note),
+                  visibility: try c.decodeIfPresent(DocVisibility.self, forKey: .visibility) ?? .shared)
+    }
+}
+
+/// A locked mental doc as others on the athlete see it (the `locked_mental_docs` view). Read only.
+public struct LockedMentalDocRow: Codable, Hashable, Sendable {
+    public static let table = "locked_mental_docs"
+
+    public var id: UUID
+    public var profileID: UUID
+    public var folder: DocFolder
+    public var docUpdatedAt: Timestamp
+
+    enum CodingKeys: String, CodingKey {
+        case id, folder
+        case profileID = "profile_id", docUpdatedAt = "doc_updated_at"
+    }
+}
+
+// MARK: - Accounts and people
+
+/// Who an account belongs to.
+public struct AccountRow: CloudRow {
+    public static let table = "accounts"
+    public static let columns = ["user_id", "display_name", "kind"]
+    public static let conflictColumns = ["user_id"]
+
+    public var userID: UUID
+    public var displayName: String
+    public var kind: Relationship
+
+    public init(userID: UUID, displayName: String, kind: Relationship) {
+        self.userID = userID
+        self.displayName = displayName
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case userID = "user_id", displayName = "display_name"
+    }
+}
+
+/// An account on an athlete, with what it can do (`profile_members`, or `my_profile_access` for the signed-in account,
+/// which has no `user_id`).
+public struct MemberRow: Decodable, Hashable, Sendable {
+    public static let table = "profile_members"
+    public static let mine = "my_profile_access"
+
+    public var profileID: UUID
+    public var userID: UUID?
+    public var role: MemberRole
+    public var relationships: Set<Relationship>
+
+    public var access: ProfileAccess { ProfileAccess(role: role, relationships: relationships) }
+
+    enum CodingKeys: String, CodingKey {
+        case role, relationships
+        case profileID = "profile_id", userID = "user_id"
+    }
+
+    /// Relationships a newer schema adds are skipped rather than failing the sync.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        profileID = try c.decode(UUID.self, forKey: .profileID)
+        userID = try c.decodeIfPresent(UUID.self, forKey: .userID)
+        role = try c.decode(MemberRole.self, forKey: .role)
+        relationships = Set(try c.decode([String].self, forKey: .relationships).compactMap(Relationship.init(rawValue:)))
+    }
+}
+
+/// An invite code for an athlete (`profile_invites`). Made and accepted through `create_profile_invite` and
+/// `accept_profile_invite`.
+public struct InviteRow: Decodable, Hashable, Identifiable, Sendable {
+    public static let table = "profile_invites"
+
+    public var code: String
+    public var profileID: UUID
+    public var relationship: Relationship
+    public var createdAt: Timestamp
+    public var expiresAt: Timestamp
+    public var acceptedAt: Timestamp?
+
+    public var id: String { code }
+
+    /// Not used yet and not expired.
+    public func isOpen(now: Date = Date()) -> Bool {
+        acceptedAt == nil && expiresAt.date > now
+    }
+
+    public var displayCode: String { InviteRow.displayCode(code) }
+
+    /// "ABCD2345" → "ABCD-2345": easier to read out or type.
+    public static func displayCode(_ code: String) -> String {
+        code.count == 8 ? "\(code.prefix(4))-\(code.suffix(4))" : code
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case code, relationship
+        case profileID = "profile_id", createdAt = "created_at", expiresAt = "expires_at", acceptedAt = "accepted_at"
     }
 }
 
@@ -546,11 +661,15 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var seasonBudgets: [SeasonBudgetRow]
     public var programBudgets: [ProgramBudgetRow]
     public var trips: [TripRow]
+    /// Docs the athlete locked, as this account sees them. Read only: the sync takes the cloud's list as it is.
+    public var lockedDocs: [LockedMentalDocRow]
+    /// What this account can do with the athlete. Nil before the athlete is in the cloud.
+    public var access: ProfileAccess?
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
                 events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
                 wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = [], seasonBudgets: [SeasonBudgetRow] = [],
-                programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = []) {
+                programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = [], lockedDocs: [LockedMentalDocRow] = [], access: ProfileAccess? = nil) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -564,16 +683,19 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.seasonBudgets = seasonBudgets
         self.programBudgets = programBudgets
         self.trips = trips
+        self.lockedDocs = lockedDocs
+        self.access = access
     }
 
     private enum CodingKeys: String, CodingKey {
         case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions,
-             seasonBudgets, programBudgets, trips
+             seasonBudgets, programBudgets, trips, lockedDocs, access
     }
 
     /// Sync records saved before height and weight tracking have no `bodyMeasurements`, those saved before
     /// wall ball have no `wallballDrills` or `wallballSessions`, those saved before budgets per season have
-    /// no `seasonBudgets` or `programBudgets`, and those saved before trips have no `trips`.
+    /// no `seasonBudgets` or `programBudgets`, those saved before trips have no `trips`, and those saved before family
+    /// accounts have no `lockedDocs` or `access`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfileRow.self, forKey: .profile)
@@ -589,6 +711,8 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         seasonBudgets = try c.decodeIfPresent([SeasonBudgetRow].self, forKey: .seasonBudgets) ?? []
         programBudgets = try c.decodeIfPresent([ProgramBudgetRow].self, forKey: .programBudgets) ?? []
         trips = try c.decodeIfPresent([TripRow].self, forKey: .trips) ?? []
+        lockedDocs = try c.decodeIfPresent([LockedMentalDocRow].self, forKey: .lockedDocs) ?? []
+        access = try c.decodeIfPresent(ProfileAccess.self, forKey: .access)
     }
 }
 
@@ -742,8 +866,11 @@ extension ProfileSnapshot {
         }
         docs = data.docs.map { d in
             MentalDocRow(id: d.id, profileID: pid, title: d.title, url: d.url.absoluteString, folder: d.folder, kind: d.kind,
-                         status: d.status, docUpdatedAt: Timestamp(d.updatedAt), docUpdatedBy: d.updatedBy, note: d.note)
+                         status: d.status, docUpdatedAt: Timestamp(d.updatedAt), docUpdatedBy: d.updatedBy, note: d.note,
+                         visibility: d.visibility)
         }
+        lockedDocs = data.lockedDocs.map { LockedMentalDocRow(id: $0.id, profileID: pid, folder: $0.folder, docUpdatedAt: Timestamp($0.updatedAt)) }
+        access = data.access
         bodyMeasurements = data.bodyMeasurements.compactMap { BodyMeasurementRow($0, profileID: pid) }
         wallballDrills = data.wallballDrills.enumerated().map { WallballDrillRow($1, profileID: pid, sortOrder: $0) }
         wallballSessions = data.wallballSessions.map { WallballBundle($0, profileID: pid) }
@@ -781,7 +908,7 @@ extension ProfileSnapshot {
             docs: docs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.compactMap { r in
                 URL(string: r.url).map {
                     MentalDoc(id: r.id, title: r.title, url: $0, folder: r.folder, kind: r.kind, status: r.status,
-                              updatedAt: r.docUpdatedAt.date, updatedBy: r.docUpdatedBy, note: r.note)
+                              updatedAt: r.docUpdatedAt.date, updatedBy: r.docUpdatedBy, note: r.note, visibility: r.visibility)
                 }
             },
             bodyMeasurements: bodyMeasurements.sorted { $0.measuredAt < $1.measuredAt }.map { r in
@@ -807,7 +934,11 @@ extension ProfileSnapshot {
                      travelMode: r.travelMode, travelDetails: r.travelDetails, hotelName: r.hotelName, hotelAddress: r.hotelAddress,
                      hotelConfirmation: r.hotelConfirmation, hotelCheckIn: r.hotelCheckIn?.date, hotelCheckOut: r.hotelCheckOut?.date,
                      note: r.note)
-            }
+            },
+            lockedDocs: lockedDocs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.map {
+                LockedMentalDoc(id: $0.id, folder: $0.folder, updatedAt: $0.docUpdatedAt.date)
+            },
+            access: access
         )
     }
 }
@@ -851,6 +982,118 @@ extension ProfileSnapshot {
             && Set(bodyMeasurements) == Set(other.bodyMeasurements)
             && Set(wallballDrills) == Set(other.wallballDrills) && Set(wallballSessions) == Set(other.wallballSessions)
             && Set(seasonBudgets) == Set(other.seasonBudgets) && Set(programBudgets) == Set(other.programBudgets)
-            && Set(trips) == Set(other.trips)
+            && Set(trips) == Set(other.trips) && Set(lockedDocs) == Set(other.lockedDocs) && access == other.access
+    }
+}
+
+// MARK: - Coaches
+
+/// A coach's roster (`rosters`). Made, renamed and given new codes through functions; the coach reads their own.
+public struct RosterRow: Decodable, Hashable, Identifiable, Sendable {
+    public static let table = "rosters"
+
+    public var id: UUID
+    public var kind: RosterKind
+    public var name: String
+    public var joinCode: String?
+
+    public init(id: UUID, kind: RosterKind, name: String, joinCode: String?) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.joinCode = joinCode
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, name
+        case joinCode = "join_code"
+    }
+}
+
+/// An athlete on a roster (`roster_athletes`).
+public struct RosterAthleteRow: Decodable, Hashable, Sendable {
+    public static let table = "roster_athletes"
+
+    public var rosterID: UUID
+    public var profileID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case rosterID = "roster_id", profileID = "profile_id"
+    }
+}
+
+/// An athlete on the signed-in coach's rosters (`roster_athlete_profiles`): what a coach sees of the profile.
+public struct CoachAthleteProfileRow: Decodable, Hashable, Sendable {
+    public static let table = "roster_athlete_profiles"
+
+    public var id: UUID
+    public var firstName: String
+    public var classYear: Int?
+    public var positions: String
+    public var benchmarkGroup: BenchmarkGroup?
+    public var weeklyGoalHours: Double
+    public var themeID: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, positions
+        case firstName = "first_name", classYear = "class_year", benchmarkGroup = "benchmark_group"
+        case weeklyGoalHours = "weekly_goal_hours", themeID = "theme_id"
+    }
+
+    /// As a profile row, with blanks for what coaches don't see.
+    var profileRow: ProfileRow {
+        ProfileRow(id: id, firstName: firstName, classYear: classYear, positions: positions, benchmarkGroup: benchmarkGroup,
+                   mentalCoachName: "", weeklyGoalHours: weeklyGoalHours, seasonLabel: "", seasonBudget: 0, themeID: themeID,
+                   bodyUnits: .imperial, usdToCAD: ExchangeRate.defaultUSDToCAD)
+    }
+}
+
+/// A coach on an athlete, from `athlete_coaches`, for the family's People list.
+public struct AthleteCoachRow: Decodable, Hashable, Identifiable, Sendable {
+    public var rosterID: UUID
+    public var rosterName: String
+    public var kind: RosterKind
+    public var coachID: UUID
+    public var coachName: String
+    /// The signed-in account (the athlete's login) lets this coach open the docs it locked.
+    public var canOpenLocked: Bool
+
+    public var id: UUID { rosterID }
+
+    public var displayName: String {
+        let name = coachName.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "A coach" : name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case rosterID = "roster_id", rosterName = "roster_name", coachID = "coach_id", coachName = "coach_name",
+             canOpenLocked = "can_open_locked"
+    }
+}
+
+/// What a code someone was given is for (`describe_code`).
+public enum CodeInfo: Equatable, Sendable, Decodable {
+    /// An invite to link this account to an athlete.
+    case invite(athleteName: String, relationship: Relationship)
+    /// A coach's roster to add an athlete to.
+    case roster(name: String, kind: RosterKind, coachName: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, athlete, relationship, roster, kind, coach
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(String.self, forKey: .type) {
+        case "invite":
+            self = .invite(athleteName: try c.decode(String.self, forKey: .athlete),
+                           relationship: try c.decode(Relationship.self, forKey: .relationship))
+        case "roster":
+            self = .roster(name: try c.decode(String.self, forKey: .roster), kind: try c.decode(RosterKind.self, forKey: .kind),
+                           coachName: try c.decode(String.self, forKey: .coach))
+        case let other:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown code type \(other)")
+        }
     }
 }
