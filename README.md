@@ -39,10 +39,11 @@ Pick your iPhone or a simulator and press **Run**. On first launch the app asks 
 
 To demo the app, debug builds can load **Maya**, a made-up athlete with a full season built around today: tap **Load the demo athlete** on the welcome screen or in **Theme & settings → Demo data**, or launch with `-demo` (`xcrun simctl launch booted com.princa.laxpocket -demo`). Loading her again rebuilds her season; she stays on the device and is never synced. Release builds don't include this.
 
-`scripts/setup-mac.sh` is a one-time step. It installs [XcodeGen](https://github.com/yonaskolb/XcodeGen) if needed, generates the Xcode project from `project.yml`, saves your signing team in `Config/Local.xcconfig` (not committed; it reads the team from your Apple Development certificate, or pass it: `scripts/setup-mac.sh ABCDE12345`), and turns on git hooks that regenerate the project after every pull, checkout or rebase. After that:
+`scripts/setup-mac.sh` is a one-time step. It installs [XcodeGen](https://github.com/yonaskolb/XcodeGen) if needed, generates the Xcode project from `project.yml`, saves your signing team in `Config/Local.xcconfig` (not committed; it reads the team from your Apple Development certificate, or pass it: `scripts/setup-mac.sh ABCDE12345`), and turns on git hooks that regenerate the project when a pull, checkout or rebase changes `project.yml`. After that:
 
-- **Pulling changes:** `git pull`, then build. The project updates itself and keeps your signing team; if Xcode asks, choose **Revert** to reload it.
-- **Making changes here and pushing:** edit in Xcode or run Claude Code in this folder, then commit and push. After adding or removing files, run `scripts/xcodegen-if-needed.sh` (Claude Code does this itself; see `CLAUDE.md`).
+- **New, renamed and deleted files** show up in Xcode by themselves, even with Xcode open: `LaxPocket/` is a synchronized folder and `Core/` is a local Swift package, so neither needs the project regenerated. Press Run as usual.
+- **Pulling changes:** `git pull`, then build. The project is only regenerated when `project.yml` changed, and it keeps your signing team; if Xcode asks then, choose **Revert** to reload it.
+- **Making changes here and pushing:** edit in Xcode or run Claude Code in this folder, then commit and push. After editing `project.yml`, run `scripts/xcodegen-if-needed.sh`.
 
 ## Project layout
 

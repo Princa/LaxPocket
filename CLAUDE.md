@@ -5,11 +5,20 @@ backend (`supabase/`). See README.md for what each screen does.
 
 ## Working on it
 
-- The Xcode project is generated from `project.yml` by XcodeGen and isn't committed. After adding, removing or
-  renaming files, or editing `project.yml`, run `scripts/xcodegen-if-needed.sh` so Xcode sees the change. Pulls,
-  checkouts and rebases do this through `.githooks` once `scripts/setup-mac.sh` has been run.
-- Signing comes from `Config/Local.xcconfig` (the developer's team ID, not committed) via `Config/Signing.xcconfig`.
-  Never put a team ID in `project.yml` or commit `Local.xcconfig`.
+- The user keeps the project open in Xcode and expects changes to show up there without regenerating the project
+  or picking the signing team again. Keep it that way:
+  - The Xcode project is generated from `project.yml` by XcodeGen and isn't committed. `LaxPocket/` is a
+    synchronized folder (`type: syncedFolder`, Xcode 16+) and `Core/` is a local Swift package, so files added,
+    renamed or removed in either appear in Xcode by themselves. Don't regenerate for them, and don't turn the app's
+    sources back into ordinary groups.
+  - Only after editing `project.yml`, run `scripts/xcodegen-if-needed.sh`. It regenerates only when `project.yml` or
+    the XcodeGen version changed, so an open Xcode isn't asked to reload for nothing. Don't run plain
+    `xcodegen generate` in the repo. The git hooks in `.githooks` run the script after pulls, checkouts and rebases
+    once `scripts/setup-mac.sh` has been run.
+  - `LaxPocket/Info.plist` is generated from `info.properties` in `project.yml`; change it there.
+  - Signing comes from `Config/Local.xcconfig` (the developer's team ID, not committed) through
+    `Config/Signing.xcconfig`, which `configFiles` in `project.yml` points at, so regenerating keeps the team. Never
+    put a team ID in `project.yml`, never commit `Local.xcconfig`, and keep `configFiles` as it is.
 - Logic and models go in `Core/Sources/LaxPocketCore` with tests in `Core/Tests`; keep views in `LaxPocket/Features`.
 - Check before pushing:
   - `cd Core && swift test`

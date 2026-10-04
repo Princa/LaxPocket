@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# One-time setup on your Mac. After this, `git pull` (or Claude Code pulling or switching branches) regenerates the
-# Xcode project on its own, and the project always has your signing team, so you just build.
+# One-time setup on your Mac. After this, new and renamed files show up in Xcode by themselves, `git pull` (or Claude
+# Code pulling or switching branches) regenerates the Xcode project when project.yml changed, and the project always
+# has your signing team, so you just build.
 #
 #   scripts/setup-mac.sh              # finds your team from your Apple Development certificate
 #   scripts/setup-mac.sh ABCDE12345   # or give the team ID
@@ -44,5 +45,5 @@ printf '// Your signing team, for local builds. Not committed.\nDEVELOPMENT_TEAM
 echo "✓ Signing team $team saved in Config/Local.xcconfig (not committed)."
 
 # 3. Generate the project now.
-xcodegen generate --quiet
+scripts/xcodegen-if-needed.sh >/dev/null
 echo "✓ LaxPocket.xcodeproj generated. Open it, pick your iPhone and press Run."
