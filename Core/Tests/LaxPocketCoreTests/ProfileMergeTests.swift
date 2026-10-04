@@ -170,6 +170,30 @@ final class ProfileMergeTests: XCTestCase {
         XCTAssertEqual(deleted.changes.wallballDrills.deletes, ["twister"])
     }
 
+    func testBudgetsMergeLikeOtherRows() {
+        var local = season
+        local.setProgramBudget(3500, programID: "club", season: 2026)
+        local.setProgramBudget(0, programID: "skills-coach", season: 2026)
+        var remote = season
+        remote.setBudget(15_000, for: 2026)
+        remote.setProgramBudget(400, programID: "gym", season: 2026)
+
+        let outcome = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: ProfileSnapshot(remote))
+        XCTAssertEqual(outcome.changes.programBudgets.upserts.map(\.amount), [3500])
+        XCTAssertEqual(outcome.changes.programBudgets.deletes, [ProgramBudgetRow.Key(programID: "skills-coach", season: 2026)])
+        XCTAssertTrue(outcome.changes.seasonBudgets.isEmpty)
+        let merged = outcome.merged.appData
+        XCTAssertEqual(merged.budget(for: 2026), 15_000)
+        XCTAssertEqual(merged.programBudget("club", season: 2026), 3500)
+        XCTAssertEqual(merged.programBudget("gym", season: 2026), 400)
+        XCTAssertEqual(merged.programBudget("skills-coach", season: 2026), 0)
+
+        local = season
+        local.setBudget(0, for: 2026)
+        let deleted = ProfileMerge.merge(base: base, local: ProfileSnapshot(local), remote: base)
+        XCTAssertEqual(deleted.changes.seasonBudgets.deletes, [2026])
+    }
+
     /// An event merges as one unit: editing a goal re-sends the whole event with its children.
     func testEventChildrenTravelWithTheEvent() {
         var local = season

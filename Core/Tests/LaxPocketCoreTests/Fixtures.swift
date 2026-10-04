@@ -11,7 +11,8 @@ enum Fixtures {
 
     static func season(name: String = "Sam") -> AppData {
         let programs = [
-            Program(id: "club", name: "Club 2031", detail: "Club team", group: .teams, sessionCategory: .team, monogram: "C31"),
+            Program(id: "club", name: "Club 2031", detail: "Club team", group: .teams, sessionCategory: .team, monogram: "C31",
+                    firstSeason: 2026, lastSeason: 2028),
             Program(id: "skills-coach", name: "Skills coach", detail: "Private coaching", group: .skills, sessionCategory: .skills, monogram: "SC"),
             Program(id: "gym", name: "Strength gym", detail: "Strength & fitness", group: .fitness, sessionCategory: .fitness, monogram: "G"),
             Program(id: "combine", name: "Combine", detail: "Testing days", group: .combine, sessionCategory: nil, monogram: "TC")
@@ -37,7 +38,7 @@ enum Fixtures {
                         checklist: [ChecklistItem(title: "Registration", done: true), ChecklistItem(title: "Flights")])
         ]
         let expenses = [
-            Expense(date: day(-10), title: "Club 2031 · season fee", category: .teamFees, amount: 1850),
+            Expense(date: day(-10), title: "Club 2031 · season fee", category: .teamFees, amount: 1850, programID: "club"),
             Expense(date: day(-2), title: "Skills coach · 4-pack", category: .coaching, amount: 320.5, note: "Paid in USD")
         ]
         let docs = [
@@ -66,6 +67,11 @@ enum Fixtures {
                                      mentalCoachName: "Coach K", weeklyGoalHours: 12.5, season: "2026/27", bodyUnits: .metric)
         return AppData(profile: profile, programs: programs, sessions: sessions, combineResults: [combine], events: events,
                        expenses: expenses, seasonBudget: 14_000, docs: docs, bodyMeasurements: body,
-                       wallballDrills: drills, wallballSessions: wallball, themeID: "northwestern")
+                       wallballDrills: drills, wallballSessions: wallball, themeID: "northwestern",
+                       programBudgets: [
+                           ProgramBudget(programID: "club", season: 2026, amount: 3000),
+                           ProgramBudget(programID: "skills-coach", season: 2026, amount: 1200),
+                           ProgramBudget(programID: "club", season: 2027, amount: 3200, note: "Fee goes up")
+                       ])
     }
 }

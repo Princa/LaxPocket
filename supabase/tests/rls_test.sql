@@ -67,6 +67,14 @@ insert into public.wallball_sets (session_id, profile_id, drill_id, hand, reps, 
   ('80000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'switch-hands', 'both', 30, 2),
   ('80000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'quick-sticks', 'right', 41, 0);
 
+-- Budgets: the club team runs three seasons with a budget for two of them; the season fee is for the club.
+update public.programs set first_season = 2026, last_season = 2028 where id = 'club';
+insert into public.season_budgets (profile_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 2026, 14000);
+insert into public.program_budgets (profile_id, program_id, season, amount) values
+  ('10000000-0000-4000-8000-000000000001', 'club', 2026, 3000),
+  ('10000000-0000-4000-8000-000000000001', 'club', 2027, 3200);
+update public.expenses set program_id = 'club', season = 2026 where id = '50000000-0000-4000-8000-000000000001';
+
 -- The same upsert PostgREST runs for "resolution=merge-duplicates".
 insert into public.profiles (id, first_name) values ('10000000-0000-4000-8000-000000000001', 'Sam K')
 on conflict (id) do update set first_name = excluded.first_name;
@@ -89,6 +97,9 @@ begin
   assert (select count(*) from public.wallball_drills) = 1, 'A sees wall ball drills';
   assert (select count(*) from public.wallball_sessions) = 2, 'A sees wall ball sessions';
   assert (select sum(reps) from public.wallball_sets) = 171, 'A sees wall ball reps';
+  assert (select amount from public.season_budgets where season = 2026) = 14000, 'A sees the season budget';
+  assert (select sum(amount) from public.program_budgets where program_id = 'club') = 6200, 'A sees a budget per season for the club';
+  assert (select program_id from public.expenses) = 'club', 'an expense can be for a program';
 end
 $$;
 
@@ -115,6 +126,22 @@ begin
   assert failed, 'program with sessions is protected';
 end
 $$;
+
+-- Deleting a program removes its budgets and keeps its expenses, unlinked.
+insert into public.programs (profile_id, id, name, program_group, first_season, last_season)
+values ('10000000-0000-4000-8000-000000000001', 'camp', 'Summer camp', 'showcases', 2026, 2026);
+insert into public.program_budgets (profile_id, program_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 'camp', 2026, 600);
+insert into public.expenses (id, profile_id, spent_at, title, category, amount, program_id, season)
+values ('50000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', '2026-07-15T12:00:00Z', 'Camp deposit', 'showcases', 150, 'camp', 2026);
+delete from public.programs where id = 'camp';
+do $$
+begin
+  assert not exists (select 1 from public.program_budgets where program_id = 'camp'), 'a deleted program''s budgets go with it';
+  assert (select program_id is null and season = 2026 and amount = 150 from public.expenses
+          where id = '50000000-0000-4000-8000-000000000002'), 'its expenses stay, without the link';
+end
+$$;
+delete from public.expenses where id = '50000000-0000-4000-8000-000000000002';
 
 -- Data checks.
 do $$
@@ -230,6 +257,48 @@ begin
   exception when check_violation then failed := true;
   end;
   assert failed, 'drills are done with each hand or both together';
+
+  failed := false;
+  begin
+    update public.programs set first_season = 2028, last_season = 2026 where id = 'club';
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a program can''t end before it starts';
+
+  failed := false;
+  begin
+    insert into public.season_budgets (profile_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 1999, 100);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'seasons start in 2000 or later';
+
+  failed := false;
+  begin
+    insert into public.program_budgets (profile_id, program_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 'club', 2028, -1);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'budgets aren''t negative';
+
+  failed := false;
+  begin
+    insert into public.program_budgets (profile_id, program_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 'club', 2026, 1);
+  exception when unique_violation then failed := true;
+  end;
+  assert failed, 'one budget per program and season';
+
+  failed := false;
+  begin
+    insert into public.program_budgets (profile_id, program_id, season, amount) values ('10000000-0000-4000-8000-000000000001', 'nope', 2026, 100);
+  exception when foreign_key_violation then failed := true;
+  end;
+  assert failed, 'program budgets need a program';
+
+  failed := false;
+  begin
+    insert into public.expenses (profile_id, spent_at, category, amount, program_id) values ('10000000-0000-4000-8000-000000000001', now(), 'travel', 10, 'nope');
+  exception when foreign_key_violation then failed := true;
+  end;
+  assert failed, 'an expense''s program has to exist';
 end
 $$;
 
@@ -253,6 +322,8 @@ begin
   assert (select count(*) from public.body_measurements) = 0, 'B sees none of A''s height and weight';
   assert (select count(*) from public.wallball_sessions) = 0, 'B sees none of A''s wall ball';
   assert (select count(*) from public.wallball_sets) = 0, 'B sees none of A''s wall ball reps';
+  assert (select count(*) from public.season_budgets) = 0, 'B sees none of A''s season budgets';
+  assert (select count(*) from public.program_budgets) = 0, 'B sees none of A''s program budgets';
   assert (select count(*) from public.profile_members) = 1, 'B sees only their own membership';
 
   update public.profiles set first_name = 'Hacked' where id = '10000000-0000-4000-8000-000000000001';
@@ -260,6 +331,8 @@ begin
   update public.body_measurements set weight_kg = 99 where profile_id = '10000000-0000-4000-8000-000000000001';
   update public.wallball_sets set reps = 999 where profile_id = '10000000-0000-4000-8000-000000000001';
   delete from public.wallball_drills where profile_id = '10000000-0000-4000-8000-000000000001';
+  update public.season_budgets set amount = 1 where profile_id = '10000000-0000-4000-8000-000000000001';
+  delete from public.program_budgets where profile_id = '10000000-0000-4000-8000-000000000001';
 
   failed := false;
   begin
@@ -361,6 +434,7 @@ begin
   assert (select count(*) from public.game_stats) = 1, 'viewer reads stats';
   assert (select count(*) from public.body_measurements) = 2, 'viewer reads height and weight';
   assert (select count(*) from public.wallball_sets) = 4, 'viewer reads wall ball reps';
+  assert (select count(*) from public.program_budgets) = 2, 'viewer reads program budgets';
   begin
     insert into public.expenses (profile_id, spent_at, category, amount)
     values ('10000000-0000-4000-8000-000000000001', now(), 'travel', 10);
@@ -475,7 +549,8 @@ begin
   foreach t in array array[
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
     'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
-    'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'profile_members'
+    'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'season_budgets', 'program_budgets',
+    'profile_members'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);

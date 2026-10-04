@@ -12,7 +12,7 @@ LaxPocket is local-first: every athlete's data lives in a JSON file on the phone
 4. **Connect the app.** `LaxPocket/Resources/Supabase.plist` holds the **Project URL** and the **anon** (or *publishable*) key; this repository's copy already points at the LaxPocket project. For a different project, replace both values (they're under the project's **Connect** button, or in **Project Settings → API Keys**); [`supabase/Supabase.example.plist`](../supabase/Supabase.example.plist) is a blank template. Then run `xcodegen generate` and build.
 5. **Sign in on the phone.** In the app: **Theme & settings → Cloud sync → Create an account**, confirm the email, then **Sign in**. Every athlete on the phone uploads. On a second phone, sign in with the same account and the athletes come down.
 
-**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql), and wall ball needs [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql).
+**Updating an existing project.** When a new file appears in `supabase/migrations`, run it (or `supabase db push`) before installing the app build that needs it. Until then that build's sync stops with an error naming the missing table or column, and data stays safe on the phone. The height and weight tracker needs [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql), wall ball needs [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql), and budgets by season and program need [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) (it turns each athlete's single budget into the budget for the season they're set to).
 
 The anon key is designed to ship inside apps. It only lets a client talk to the API; row-level security decides what each signed-in account can read or write. Never put the `service_role` key in the app.
 
@@ -20,7 +20,7 @@ Once your own accounts exist, you can turn off **Allow new users to sign up** in
 
 ## Schema
 
-The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight, and [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql) adds wall ball. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
+The migrations are in [`supabase/migrations`](../supabase/migrations): [`20260927000000_laxpocket_schema.sql`](../supabase/migrations/20260927000000_laxpocket_schema.sql) creates everything, [`20260930000000_body_measurements.sql`](../supabase/migrations/20260930000000_body_measurements.sql) adds height and weight, [`20261002000000_wallball.sql`](../supabase/migrations/20261002000000_wallball.sql) adds wall ball, and [`20261003000000_program_budgets.sql`](../supabase/migrations/20261003000000_program_budgets.sql) adds budgets by season and program. Each table maps one-to-one to a model in `Core/Sources/LaxPocketCore` and to a row type in `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`.
 
 ```mermaid
 erDiagram
@@ -38,6 +38,9 @@ erDiagram
     season_events ||--o{ event_videos : ""
     season_events ||--o{ event_checklist_items : ""
     profiles ||--o{ expenses : ""
+    programs ||--o{ expenses : "for"
+    profiles ||--o{ season_budgets : ""
+    programs ||--o{ program_budgets : "one per season"
     profiles ||--o{ mental_docs : ""
     profiles ||--o{ body_measurements : ""
     profiles ||--o{ wallball_drills : ""
@@ -47,9 +50,9 @@ erDiagram
 
 | Table | One row per | Key columns |
 |---|---|---|
-| `profiles` | athlete | `id` (same UUID as on the phone), name, class year, positions, NDTP group, weekly goal, season label, budget, theme, `body_units` (`imperial` / `metric`) |
+| `profiles` | athlete | `id` (same UUID as on the phone), name, class year, positions, NDTP group, weekly goal, season label, theme, `body_units` (`imperial` / `metric`). `season_budget` is only kept for older builds; budgets live in `season_budgets` |
 | `profile_members` | account with access to an athlete | `profile_id`, `user_id`, `role`: `owner` / `editor` / `viewer` |
-| `programs` | team, coach, facility… | primary key (`profile_id`, `id`); group; which session type it counts toward |
+| `programs` | team, coach, facility… | primary key (`profile_id`, `id`); group; which session type it counts toward; `first_season` / `last_season` it runs (either can be null: open-ended) |
 | `training_sessions` | logged session | `started_at`, `category`, `minutes`, `effort` (RPE 1–10), `focus` (text array), `notes`; foreign key to its program |
 | `combine_results` | testing day | `tested_at`, `event_name`, height and weight as typed |
 | `combine_measurements` | result on a testing day | primary key (`result_id`, `metric`); `value` in N, inches or seconds |
@@ -59,7 +62,9 @@ erDiagram
 | `event_focus_goals` | pre-game goal | `position`, `goal`, `outcome` (`pending` / `hit` / `partly` / `missed`), `note` |
 | `event_videos` | video link | `position`, `title`, `url`, `duration_text` |
 | `event_checklist_items` | prep checklist item | `position`, `title`, `done` |
-| `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note` |
+| `expenses` | expense | `spent_at`, `title`, `category`, `amount` (profile currency, CAD by default), `note`, `program_id` (optional; deleting the program clears it), `season` (null on older rows: the season of `spent_at`) |
+| `season_budgets` | season with a budget | primary key (`profile_id`, `season`); `amount`, `note` |
+| `program_budgets` | program's budget for one season | primary key (`profile_id`, `program_id`, `season`); `amount`, `note`. A program running several seasons has a row per season |
 | `body_measurements` | height and weight check | `measured_at`, `height_cm` (0.1 cm, 50–250), `weight_kg` (0.01 kg, 10–250), `note`. Either value can be null, not both. Always metric; `profiles.body_units` only sets how the app shows them |
 | `wallball_drills` | drill the athlete added or changed | primary key (`profile_id`, `id`); `name`, `hands` (`each`: right and left counted separately, `together`: one count), `default_reps` (1–500), `hidden`. The built-in routine lives in the app, so only the athlete's own drills and edited built-ins are stored |
 | `wallball_sessions` | day's wall ball, or a timed challenge | `done_at`, `minutes`, `challenge_seconds` (5–3600, set for a challenge), `notes` |
@@ -67,6 +72,8 @@ erDiagram
 | `mental_docs` | linked Drive document | `url`, `folder`, `kind`, `status`, when and by whom the document was last updated. The file itself stays in Google Drive |
 
 Design choices:
+
+- **Seasons are stored as the year they start**: `2026` is the 2026/27 season, which starts in August. An expense's season defaults to the season of its date but can be set, since a fee paid in July is often for the season starting in August.
 
 - **Everything hangs off `profiles`.** Deleting an athlete deletes all of their rows (`on delete cascade`).
 - **IDs come from the phone.** Rows are created offline, so the app assigns UUIDs (program IDs are short strings, unique per athlete) and the database accepts them. Upserts are safe to repeat.

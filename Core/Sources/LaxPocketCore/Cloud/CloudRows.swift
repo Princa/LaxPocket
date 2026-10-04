@@ -61,7 +61,8 @@ extension ProfileRow {
 
 public struct ProgramRow: CloudRow {
     public static let table = "programs"
-    public static let columns = ["profile_id", "id", "name", "detail", "program_group", "session_category", "monogram", "sort_order"]
+    public static let columns = ["profile_id", "id", "name", "detail", "program_group", "session_category", "monogram", "sort_order",
+                                 "first_season", "last_season"]
     public static let conflictColumns = ["profile_id", "id"]
 
     public var profileID: UUID
@@ -72,10 +73,14 @@ public struct ProgramRow: CloudRow {
     public var sessionCategory: SessionCategory?
     public var monogram: String
     public var sortOrder: Int
+    /// Nil on rows saved before programs had seasons.
+    public var firstSeason: Int? = nil
+    public var lastSeason: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, name, detail, monogram
         case profileID = "profile_id", programGroup = "program_group", sessionCategory = "session_category", sortOrder = "sort_order"
+        case firstSeason = "first_season", lastSeason = "last_season"
     }
 }
 
@@ -258,7 +263,7 @@ public struct ChecklistItemRow: CloudRow {
 
 public struct ExpenseRow: CloudRow {
     public static let table = "expenses"
-    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note"]
+    public static let columns = ["id", "profile_id", "spent_at", "title", "category", "amount", "note", "program_id", "season"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -268,10 +273,82 @@ public struct ExpenseRow: CloudRow {
     public var category: ExpenseCategory
     public var amount: Double
     public var note: String
+    public var programID: String?
+    public var season: Int
 
     enum CodingKeys: String, CodingKey {
-        case id, title, category, amount, note
-        case profileID = "profile_id", spentAt = "spent_at"
+        case id, title, category, amount, note, season
+        case profileID = "profile_id", spentAt = "spent_at", programID = "program_id"
+    }
+}
+
+extension ExpenseRow {
+    public init(id: UUID, profileID: UUID, spentAt: Timestamp, title: String, category: ExpenseCategory, amount: Double, note: String,
+                programID: String? = nil, season: Int? = nil) {
+        self.id = id
+        self.profileID = profileID
+        self.spentAt = spentAt
+        self.title = title
+        self.category = category
+        self.amount = amount
+        self.note = note
+        self.programID = programID
+        self.season = season ?? AthleteProfile.seasonStart(for: spentAt.date)
+    }
+
+    /// Rows written before expenses had seasons (by an older build, or saved in a sync record) have no season; they
+    /// count toward the season of `spent_at`, the same as on the phone.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        profileID = try c.decode(UUID.self, forKey: .profileID)
+        spentAt = try c.decode(Timestamp.self, forKey: .spentAt)
+        title = try c.decode(String.self, forKey: .title)
+        category = try c.decode(ExpenseCategory.self, forKey: .category)
+        amount = try c.decode(Double.self, forKey: .amount)
+        note = try c.decode(String.self, forKey: .note)
+        programID = try c.decodeIfPresent(String.self, forKey: .programID)
+        season = try c.decodeIfPresent(Int.self, forKey: .season) ?? AthleteProfile.seasonStart(for: spentAt.date)
+    }
+}
+
+public struct SeasonBudgetRow: CloudRow {
+    public static let table = "season_budgets"
+    public static let columns = ["profile_id", "season", "amount", "note"]
+    public static let conflictColumns = ["profile_id", "season"]
+
+    public var profileID: UUID
+    public var season: Int
+    public var amount: Double
+    public var note: String
+
+    enum CodingKeys: String, CodingKey {
+        case season, amount, note
+        case profileID = "profile_id"
+    }
+}
+
+public struct ProgramBudgetRow: CloudRow {
+    public static let table = "program_budgets"
+    public static let columns = ["profile_id", "program_id", "season", "amount", "note"]
+    public static let conflictColumns = ["profile_id", "program_id", "season"]
+
+    public struct Key: Hashable, Sendable {
+        public var programID: String
+        public var season: Int
+    }
+
+    public var profileID: UUID
+    public var programID: String
+    public var season: Int
+    public var amount: Double
+    public var note: String
+
+    public var key: Key { Key(programID: programID, season: season) }
+
+    enum CodingKeys: String, CodingKey {
+        case season, amount, note
+        case profileID = "profile_id", programID = "program_id"
     }
 }
 
@@ -416,10 +493,13 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var bodyMeasurements: [BodyMeasurementRow]
     public var wallballDrills: [WallballDrillRow]
     public var wallballSessions: [WallballBundle]
+    public var seasonBudgets: [SeasonBudgetRow]
+    public var programBudgets: [ProgramBudgetRow]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
                 events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
-                wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = []) {
+                wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = [], seasonBudgets: [SeasonBudgetRow] = [],
+                programBudgets: [ProgramBudgetRow] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -430,14 +510,18 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.bodyMeasurements = bodyMeasurements
         self.wallballDrills = wallballDrills
         self.wallballSessions = wallballSessions
+        self.seasonBudgets = seasonBudgets
+        self.programBudgets = programBudgets
     }
 
     private enum CodingKeys: String, CodingKey {
-        case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions
+        case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions,
+             seasonBudgets, programBudgets
     }
 
-    /// Sync records saved before height and weight tracking have no `bodyMeasurements`, and those saved before
-    /// wall ball have no `wallballDrills` or `wallballSessions`.
+    /// Sync records saved before height and weight tracking have no `bodyMeasurements`, those saved before
+    /// wall ball have no `wallballDrills` or `wallballSessions`, and those saved before budgets per season have
+    /// no `seasonBudgets` or `programBudgets`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfileRow.self, forKey: .profile)
@@ -450,6 +534,8 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurementRow].self, forKey: .bodyMeasurements) ?? []
         wallballDrills = try c.decodeIfPresent([WallballDrillRow].self, forKey: .wallballDrills) ?? []
         wallballSessions = try c.decodeIfPresent([WallballBundle].self, forKey: .wallballSessions) ?? []
+        seasonBudgets = try c.decodeIfPresent([SeasonBudgetRow].self, forKey: .seasonBudgets) ?? []
+        programBudgets = try c.decodeIfPresent([ProgramBudgetRow].self, forKey: .programBudgets) ?? []
     }
 }
 
@@ -520,9 +606,13 @@ extension ProfileSnapshot {
         let pid = data.id
         profile = ProfileRow(data)
         programs = data.programs.enumerated().map { index, p in
-            ProgramRow(profileID: pid, id: p.id, name: p.name, detail: p.detail, programGroup: p.group,
-                       sessionCategory: p.sessionCategory, monogram: p.monogram, sortOrder: index)
+            // Seasons the database wouldn't take are left open-ended, and a range typed backwards is turned around.
+            var first = p.firstSeason.flatMap(validSeason), last = p.lastSeason.flatMap(validSeason)
+            if let f = first, let l = last, l < f { (first, last) = (l, f) }
+            return ProgramRow(profileID: pid, id: p.id, name: p.name, detail: p.detail, programGroup: p.group,
+                              sessionCategory: p.sessionCategory, monogram: p.monogram, sortOrder: index, firstSeason: first, lastSeason: last)
         }
+        let programIDs = Set(data.programs.map(\.id))
         sessions = data.sessions.map { s in
             SessionRow(id: s.id, profileID: pid, programID: s.programID, startedAt: Timestamp(s.date), category: s.category,
                        minutes: s.minutes, effort: s.effort, focus: s.focus, notes: s.notes)
@@ -564,8 +654,18 @@ extension ProfileSnapshot {
             )
         }
         expenses = data.expenses.map { x in
+            // A link to a program that's gone would fail the foreign key, so it's dropped.
             ExpenseRow(id: x.id, profileID: pid, spentAt: Timestamp(x.date), title: x.title, category: x.category,
-                       amount: roundedTo(2, x.amount), note: x.note)
+                       amount: roundedTo(2, x.amount), note: x.note, programID: x.programID.flatMap { programIDs.contains($0) ? $0 : nil },
+                       season: validSeason(x.season))
+        }
+        seasonBudgets = data.seasonBudgets.compactMap { b in
+            guard let season = validSeason(b.season), roundedTo(2, b.amount) > 0 else { return nil }
+            return SeasonBudgetRow(profileID: pid, season: season, amount: roundedTo(2, b.amount), note: b.note)
+        }
+        programBudgets = data.programBudgets.compactMap { b in
+            guard programIDs.contains(b.programID), let season = validSeason(b.season), roundedTo(2, b.amount) > 0 else { return nil }
+            return ProgramBudgetRow(profileID: pid, programID: b.programID, season: season, amount: roundedTo(2, b.amount), note: b.note)
         }
         docs = data.docs.map { d in
             MentalDocRow(id: d.id, profileID: pid, title: d.title, url: d.url.absoluteString, folder: d.folder, kind: d.kind,
@@ -588,7 +688,8 @@ extension ProfileSnapshot {
             id: p.id,
             profile: athlete,
             programs: programs.sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }.map { r in
-                Program(id: r.id, name: r.name, detail: r.detail, group: r.programGroup, sessionCategory: r.sessionCategory, monogram: r.monogram)
+                Program(id: r.id, name: r.name, detail: r.detail, group: r.programGroup, sessionCategory: r.sessionCategory, monogram: r.monogram,
+                        firstSeason: r.firstSeason, lastSeason: r.lastSeason)
             },
             sessions: sessions.sorted { $0.startedAt < $1.startedAt }.map { r in
                 TrainingSession(id: r.id, date: r.startedAt.date, programID: r.programID, category: r.category, minutes: r.minutes,
@@ -601,9 +702,9 @@ extension ProfileSnapshot {
             },
             events: events.sorted { $0.event.startsAt < $1.event.startsAt }.map(\.seasonEvent),
             expenses: expenses.sorted { $0.spentAt < $1.spentAt }.map { r in
-                Expense(id: r.id, date: r.spentAt.date, title: r.title, category: r.category, amount: r.amount, note: r.note)
+                Expense(id: r.id, date: r.spentAt.date, title: r.title, category: r.category, amount: r.amount, note: r.note,
+                        programID: r.programID, season: r.season)
             },
-            seasonBudget: p.seasonBudget,
             docs: docs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.compactMap { r in
                 URL(string: r.url).map {
                     MentalDoc(id: r.id, title: r.title, url: $0, folder: r.folder, kind: r.kind, status: r.status,
@@ -621,9 +722,19 @@ extension ProfileSnapshot {
                                 sets: b.sets.sorted { $0.position < $1.position }.map { WallballSet(drillID: $0.drillID, hand: $0.hand, reps: $0.reps) },
                                 minutes: b.session.minutes, challengeSeconds: b.session.challengeSeconds, notes: b.session.notes)
             },
-            themeID: p.themeID
+            themeID: p.themeID,
+            // profiles.season_budget is still written for older builds, but the budgets per season are what count.
+            seasonBudgets: seasonBudgets.sorted { $0.season < $1.season }.map { SeasonBudget(season: $0.season, amount: $0.amount, note: $0.note) },
+            programBudgets: programBudgets.sorted { ($0.season, $0.programID) < ($1.season, $1.programID) }.map {
+                ProgramBudget(programID: $0.programID, season: $0.season, amount: $0.amount, note: $0.note)
+            }
         )
     }
+}
+
+/// A season the database accepts (2000/01 to 2100/01), or nil.
+private func validSeason(_ season: Int) -> Int? {
+    (2000...2100).contains(season) ? season : nil
 }
 
 extension EventBundle {
@@ -659,5 +770,6 @@ extension ProfileSnapshot {
             && Set(expenses) == Set(other.expenses) && Set(docs) == Set(other.docs)
             && Set(bodyMeasurements) == Set(other.bodyMeasurements)
             && Set(wallballDrills) == Set(other.wallballDrills) && Set(wallballSessions) == Set(other.wallballSessions)
+            && Set(seasonBudgets) == Set(other.seasonBudgets) && Set(programBudgets) == Set(other.programBudgets)
     }
 }

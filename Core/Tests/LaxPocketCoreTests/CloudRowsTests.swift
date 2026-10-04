@@ -66,6 +66,9 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertEqual(rebuilt.profile.bodyUnits, .metric)
         XCTAssertEqual(rebuilt.wallballDrills, data.wallballDrills)
         XCTAssertEqual(rebuilt.wallballSessions, data.wallballSessions)
+        XCTAssertEqual(rebuilt.expenses.sorted { $0.date < $1.date }, data.expenses.sorted { $0.date < $1.date })
+        XCTAssertEqual(rebuilt.seasonBudgets, data.seasonBudgets)
+        XCTAssertEqual(rebuilt.programBudgets, data.programBudgets)
 
         let json = try JSONEncoder().encode(snapshot)
         XCTAssertEqual(try JSONDecoder().decode(ProfileSnapshot.self, from: json), snapshot)
@@ -96,12 +99,15 @@ final class CloudRowsTests: XCTestCase {
         data.profile.weeklyGoalHours = 12.25
         data.seasonBudget = 999.999
         data.expenses[0].amount = 10.005
+        data.programBudgets[0].amount = 0.001
         data.combineResults[0].measurements.append(CombineMeasurement(metric: .gripLeft, value: 300))
         let snapshot = ProfileSnapshot(data)
         XCTAssertNil(snapshot.profile.classYear, "the column only takes graduation years")
         XCTAssertEqual(snapshot.profile.weeklyGoalHours, 12.3)
         XCTAssertEqual(snapshot.profile.seasonBudget, 1000)
         XCTAssertEqual(snapshot.expenses[0].amount, 10.01)
+        XCTAssertEqual(snapshot.seasonBudgets.map(\.amount), [1000])
+        XCTAssertEqual(snapshot.programBudgets.count, 2, "a budget that rounds to nothing has no row")
         let grips = snapshot.combineResults[0].measurements.filter { $0.metric == .gripLeft }
         XCTAssertEqual(grips.map(\.value), [300], "one value per metric; the last one wins")
     }
@@ -139,6 +145,47 @@ final class CloudRowsTests: XCTestCase {
         XCTAssertNil(bundle.session.challengeSeconds)
         XCTAssertEqual(bundle.sets.map(\.reps), [50, 5000], "repeats of a drill and hand add up, empty sets are dropped, reps are capped")
         XCTAssertEqual(bundle.sets.map(\.position), [0, 1])
+    }
+
+    func testBudgetRowsOnlyPointAtProgramsThatExist() {
+        var data = Fixtures.season()
+        data.programs.removeAll { $0.id == "club" }
+        data.programs[0].firstSeason = 2028
+        data.programs[0].lastSeason = 2026
+        data.programs[1].firstSeason = 1999
+        data.expenses[1].season = 3000
+        let snapshot = ProfileSnapshot(data)
+        XCTAssertNil(snapshot.expenses[0].programID, "a link to a deleted program would fail the foreign key")
+        XCTAssertEqual(snapshot.programBudgets.map(\.programID), ["skills-coach"])
+        XCTAssertEqual(snapshot.programs[0].firstSeason, 2026, "a range typed backwards is turned around")
+        XCTAssertEqual(snapshot.programs[0].lastSeason, 2028)
+        XCTAssertNil(snapshot.programs[1].firstSeason)
+        XCTAssertEqual(snapshot.expenses[1].season, 2026, "a season the database won't take falls back to the season of the date")
+    }
+
+    /// Rows from before budgets per season: programs and expenses without seasons, and no budget tables.
+    func testReadsRowsFromBeforeBudgetsPerSeason() throws {
+        let json = """
+        [{"id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "profile_id": "10000000-0000-4000-8000-000000000001", "spent_at": "2027-03-01T12:00:00+00:00",
+          "title": "Stick", "category": "equipment", "amount": 250, "note": "", "program_id": null, "season": null}]
+        """
+        let expense = try XCTUnwrap(JSONDecoder().decode([ExpenseRow].self, from: Data(json.utf8)).first)
+        XCTAssertEqual(expense.season, 2026)
+        XCTAssertNil(expense.programID)
+
+        let snapshot = ProfileSnapshot(Fixtures.season())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: AppData.encoder.encode(snapshot)) as? [String: Any])
+        object["seasonBudgets"] = nil
+        object["programBudgets"] = nil
+        object["expenses"] = (object["expenses"] as? [[String: Any]])?.map { row in
+            var row = row
+            row["season"] = nil
+            row["program_id"] = nil
+            return row
+        }
+        let old = try AppData.decoder.decode(ProfileSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(old.seasonBudgets.isEmpty)
+        XCTAssertEqual(old.expenses.map(\.season), [2026, 2026])
     }
 
     /// Sync records written before height and weight tracking still load, so the next sync has its base.
@@ -186,6 +233,11 @@ final class CloudRowsTests: XCTestCase {
         try check(game.videos[0])
         try check(try XCTUnwrap(snapshot.events.first { !$0.checklist.isEmpty }).checklist[0])
         try check(snapshot.expenses[0])
+        XCTAssertEqual(try keys(snapshot.expenses[0]), Set(ExpenseRow.columns))
+        XCTAssertEqual(try keys(snapshot.expenses[1]), Set(ExpenseRow.columns).subtracting(["program_id"]), "no program writes a null link")
+        try check(snapshot.seasonBudgets[0])
+        try check(snapshot.programBudgets[0])
+        XCTAssertEqual(try keys(snapshot.programs[0]), Set(ProgramRow.columns))
         try check(snapshot.docs[0])
         try check(snapshot.bodyMeasurements[0])
         XCTAssertEqual(try keys(snapshot.bodyMeasurements[0]), Set(BodyMeasurementRow.columns))

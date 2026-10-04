@@ -140,8 +140,23 @@ final class AppStore {
         update { $0.sessions.removeAll { ids.contains($0.id) } }
     }
 
-    func addExpense(_ expense: Expense) {
-        update { $0.expenses.append(expense) }
+    /// Adds the expense, or replaces the one with the same ID.
+    func saveExpense(_ expense: Expense) {
+        update { data in
+            if let index = data.expenses.firstIndex(where: { $0.id == expense.id }) {
+                data.expenses[index] = expense
+            } else {
+                data.expenses.append(expense)
+            }
+        }
+    }
+
+    /// Sets a season's overall budget and the program budgets for that season in one change; 0 removes one.
+    func setBudgets(season: Int, overall: Double, programs: [String: Double]) {
+        update { data in
+            data.setBudget(overall, for: season)
+            for (programID, amount) in programs { data.setProgramBudget(amount, programID: programID, season: season) }
+        }
     }
 
     func deleteExpenses(_ ids: Set<UUID>) {
@@ -178,14 +193,19 @@ final class AppStore {
         }
     }
 
-    /// Only programs with no logged sessions can be deleted, so the training log never points at a missing program.
+    /// Only programs with no logged sessions or expenses can be deleted, so the training log and the budget never
+    /// point at a missing program.
     func canDeleteProgram(_ id: String) -> Bool {
-        !data.sessions.contains { $0.programID == id }
+        !data.sessions.contains { $0.programID == id } && !data.expenses.contains { $0.programID == id }
     }
 
+    /// Deletes the program and its budgets.
     func deleteProgram(_ id: String) {
         guard canDeleteProgram(id) else { return }
-        update { $0.programs.removeAll { $0.id == id } }
+        update { data in
+            data.programs.removeAll { $0.id == id }
+            data.programBudgets.removeAll { $0.programID == id }
+        }
     }
 
     func addDoc(_ doc: MentalDoc) {

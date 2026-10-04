@@ -27,6 +27,8 @@ public struct SyncChanges: Hashable, Sendable {
     public var bodyMeasurements = TableChanges<BodyMeasurementRow, UUID>()
     public var wallballDrills = TableChanges<WallballDrillRow, String>()
     public var wallballSessions = TableChanges<WallballBundle, UUID>()
+    public var seasonBudgets = TableChanges<SeasonBudgetRow, Int>()
+    public var programBudgets = TableChanges<ProgramBudgetRow, ProgramBudgetRow.Key>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -34,7 +36,7 @@ public struct SyncChanges: Hashable, Sendable {
 
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
-            && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty
+            && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty && seasonBudgets.isEmpty && programBudgets.isEmpty
     }
 }
 
@@ -69,6 +71,8 @@ public enum ProfileMerge {
             changes.bodyMeasurements.upserts = local.bodyMeasurements
             changes.wallballDrills.upserts = local.wallballDrills
             changes.wallballSessions.upserts = local.wallballSessions
+            changes.seasonBudgets.upserts = local.seasonBudgets
+            changes.programBudgets.upserts = local.programBudgets
             return Outcome(merged: local, changes: changes)
         }
 
@@ -96,10 +100,15 @@ public enum ProfileMerge {
         changes.wallballDrills = TableChanges(upserts: drills.upserts, deletes: drills.deletes)
         let wallball = rows(base: base?.wallballSessions ?? [], local: local.wallballSessions, remote: remote.wallballSessions, key: \.id)
         changes.wallballSessions = TableChanges(upserts: wallball.upserts, deletes: wallball.deletes)
+        let seasonBudgets = rows(base: base?.seasonBudgets ?? [], local: local.seasonBudgets, remote: remote.seasonBudgets, key: \.season)
+        changes.seasonBudgets = TableChanges(upserts: seasonBudgets.upserts, deletes: seasonBudgets.deletes)
+        let programBudgets = rows(base: base?.programBudgets ?? [], local: local.programBudgets, remote: remote.programBudgets, key: \.key)
+        changes.programBudgets = TableChanges(upserts: programBudgets.upserts, deletes: programBudgets.deletes)
 
         let merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
                                      combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
-                                     bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged)
+                                     bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged,
+                                     seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged)
         return Outcome(merged: merged, changes: changes)
     }
 

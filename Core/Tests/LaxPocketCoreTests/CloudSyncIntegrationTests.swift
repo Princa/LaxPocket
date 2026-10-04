@@ -49,6 +49,8 @@ final class CloudSyncIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(a.bodyMeasurements), Set(b.bodyMeasurements), "height and weight", file: file, line: line)
         XCTAssertEqual(Set(a.wallballDrills), Set(b.wallballDrills), "wall ball drills", file: file, line: line)
         XCTAssertEqual(Set(a.wallballSessions), Set(b.wallballSessions), "wall ball", file: file, line: line)
+        XCTAssertEqual(Set(a.seasonBudgets), Set(b.seasonBudgets), "season budgets", file: file, line: line)
+        XCTAssertEqual(Set(a.programBudgets), Set(b.programBudgets), "program budgets", file: file, line: line)
     }
 
     func testTwoDevicesSyncOneAthlete() async throws {
@@ -86,6 +88,9 @@ final class CloudSyncIntegrationTests: XCTestCase {
         phoneData.wallballSessions[0].sets.removeAll { $0.drillID == "twister" }
         phoneData.wallballSessions[0].sets[0].reps = 60
         phoneData.wallballDrills.removeAll { $0.id == "behind-the-back" }
+        phoneData.setProgramBudget(3500, programID: "club", season: 2026)
+        phoneData.programs[0].lastSeason = 2029
+        phoneData.expenses[0].note = "Paid by e-transfer"
 
         tabletData.sessions[2].notes = "From the tablet"
         tabletData.docs.append(MentalDoc(title: "Season goals", url: URL(string: "https://docs.google.com/document/d/xyz")!, folder: .goals,
@@ -95,6 +100,9 @@ final class CloudSyncIntegrationTests: XCTestCase {
         tabletData.bodyMeasurements.append(BodyMeasurement(date: Fixtures.day(5, hour: 8), heightCm: 160.3, weightKg: 48.53))
         tabletData.wallballSessions.append(WallballSession(date: Fixtures.day(2, hour: 7), sets: [WallballSet(drillID: "sidearm", hand: .left, reps: 25)]))
         tabletData.wallballSessions.removeAll { $0.id == season.wallballSessions[1].id }
+        tabletData.setBudget(15_000, for: 2026)
+        tabletData.setProgramBudget(0, programID: "skills-coach", season: 2026)
+        tabletData.expenses.append(Expense(date: Fixtures.day(6), title: "Club jacket", category: .equipment, amount: 95, programID: "club", season: 2027))
 
         phoneBase = try await phone.sync(local: phoneData, base: phoneBase)
         tabletBase = try await tablet.sync(local: tabletData, base: tabletBase)
@@ -108,7 +116,12 @@ final class CloudSyncIntegrationTests: XCTestCase {
         let final = cloud.appData
         XCTAssertEqual(final.sessions.first { $0.id == season.sessions[0].id }?.minutes, 75)
         XCTAssertEqual(final.sessions.first { $0.id == season.sessions[2].id }?.notes, "From the tablet")
-        XCTAssertEqual(final.expenses.count, 1)
+        XCTAssertEqual(final.expenses.count, 2)
+        XCTAssertEqual(final.expenses.first { $0.programID == "club" && $0.season == 2026 }?.note, "Paid by e-transfer")
+        XCTAssertEqual(final.expenses.first { $0.season == 2027 }?.title, "Club jacket")
+        XCTAssertEqual(final.budget(for: 2026), 15_000)
+        XCTAssertEqual(final.programBudgets.map(\.amount), [3500, 3200])
+        XCTAssertEqual(final.programs.first { $0.id == "club" }?.lastSeason, 2029)
         XCTAssertFalse(final.programs.contains { $0.id == "combine" })
         XCTAssertEqual(final.docs.count, 2)
         XCTAssertEqual(final.profile.weeklyGoalHours, 14)

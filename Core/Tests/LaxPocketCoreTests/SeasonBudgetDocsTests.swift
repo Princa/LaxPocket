@@ -54,6 +54,80 @@ final class BudgetTests: XCTestCase {
         XCTAssertFalse(summary.isOverBudget)
         XCTAssertTrue(BudgetMath.summary(expenses: expenses, budget: 4000).isOverBudget)
     }
+
+    func testSeasonByProgram() {
+        var data = Fixtures.season()
+        data.expenses.append(Expense(date: Fixtures.day(5), title: "Next year's deposit", category: .teamFees, amount: 500,
+                                     programID: "club", season: 2027))
+        let summary = BudgetMath.season(2026, in: data)
+        XCTAssertEqual(summary.overall, 14_000)
+        XCTAssertEqual(summary.allocated, 4200)
+        XCTAssertEqual(summary.summary.budget, 14_000)
+        XCTAssertEqual(summary.summary.spent, 2170.5, accuracy: 1e-9, "only this season's expenses")
+        XCTAssertFalse(summary.isOverAllocated)
+        XCTAssertEqual(summary.programs.map(\.id), ["club", "skills-coach", ""], "program order, then spending with no program")
+        XCTAssertEqual(summary.programs[0].spent, 1850)
+        XCTAssertEqual(summary.programs[0].budget, 3000)
+        XCTAssertEqual(summary.programs[1].spent, 0)
+        XCTAssertEqual(summary.programs[2].spent, 320.5)
+        XCTAssertEqual(summary.programs[2].expenseCount, 1)
+
+        let next = BudgetMath.season(2027, in: data)
+        XCTAssertEqual(next.overall, 0)
+        XCTAssertEqual(next.summary.budget, 3200, "with no overall budget, the program budgets add up to the budget")
+        XCTAssertEqual(next.programs.map(\.id), ["club"])
+        XCTAssertEqual(next.programs[0].spent, 500)
+
+        data.setBudget(4000, for: 2026)
+        XCTAssertTrue(BudgetMath.season(2026, in: data).isOverAllocated)
+    }
+
+    func testSettingBudgets() {
+        var data = Fixtures.season()
+        XCTAssertEqual(data.seasonBudget, 14_000, "the season the profile is set to")
+        XCTAssertEqual(data.seasonBudgets, [SeasonBudget(season: 2026, amount: 14_000)])
+        data.setBudget(9000, for: 2027)
+        data.seasonBudget = 15_000
+        XCTAssertEqual(data.seasonBudgets.map(\.amount), [15_000, 9000])
+        data.setBudget(0, for: 2027)
+        XCTAssertEqual(data.seasonBudgets.map(\.season), [2026], "0 removes a budget")
+
+        data.setProgramBudget(3500, programID: "club", season: 2026)
+        XCTAssertEqual(data.programBudget("club", season: 2026), 3500)
+        XCTAssertEqual(data.programBudget("club", season: 2027), 3200)
+        data.setProgramBudget(0, programID: "skills-coach", season: 2026)
+        XCTAssertEqual(data.programBudgets.map(\.programID), ["club", "club"])
+    }
+
+    func testProgramSeasons() {
+        let data = Fixtures.season()
+        let club = data.programs[0]
+        XCTAssertTrue(club.runs(in: 2026))
+        XCTAssertTrue(club.runs(in: 2028))
+        XCTAssertFalse(club.runs(in: 2029))
+        XCTAssertEqual(club.seasonsText, "2026/27 – 2028/29")
+        XCTAssertEqual(data.programs(in: 2029).map(\.id), ["skills-coach", "gym", "combine"], "open-ended programs run every season")
+        XCTAssertEqual(Program(id: "x", name: "X", detail: "", group: .showcases, sessionCategory: nil, monogram: "X", firstSeason: 2027).seasonsText,
+                       "From 2027/28")
+        XCTAssertEqual(data.budgetSeasons(current: 2026), [2028, 2027, 2026])
+    }
+
+    func testSeasonLabels() {
+        XCTAssertEqual(AthleteProfile.seasonStart(label: "2026/27"), 2026)
+        XCTAssertEqual(AthleteProfile.seasonStart(label: " 2026-2027"), 2026)
+        XCTAssertNil(AthleteProfile.seasonStart(label: "Fall"))
+        XCTAssertNil(AthleteProfile.seasonStart(label: "26/27"))
+        XCTAssertEqual(AthleteProfile.seasonLabel(start: 2026), "2026/27")
+        XCTAssertEqual(Fixtures.season().profile.currentSeason(), 2026)
+    }
+
+    /// Expenses saved before seasons count toward the season of their date.
+    func testOldExpensesGetTheSeasonOfTheirDate() throws {
+        let json = #"[{"id": "3F2504E0-4F89-11D3-9A0C-0305E82C3301", "date": "2027-03-01T12:00:00Z", "title": "Stick", "category": "equipment", "amount": 250, "note": ""}]"#
+        let expense = try XCTUnwrap(AppData.decoder.decode([Expense].self, from: Data(json.utf8)).first)
+        XCTAssertEqual(expense.season, 2026)
+        XCTAssertNil(expense.programID)
+    }
 }
 
 final class MentalDocTests: XCTestCase {
@@ -117,6 +191,7 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(data.schemaVersion, AppData.currentSchemaVersion)
         XCTAssertEqual(data.profile.firstName, "Sam")
         XCTAssertEqual(data.seasonBudget, 500)
+        XCTAssertEqual(data.seasonBudgets, [SeasonBudget(season: 2026, amount: 500)], "the old budget is for the season the profile was set to")
         XCTAssertEqual(data.themeID, "navy")
         XCTAssertEqual(data.combineResults.first?.value(for: .gripLeft), 262)
         XCTAssertTrue(data.bodyMeasurements.isEmpty)
@@ -131,10 +206,11 @@ final class AppDataTests: XCTestCase {
         XCTAssertEqual(blank.id, season.id)
         XCTAssertEqual(blank.profile, season.profile)
         XCTAssertEqual(blank.programs, season.programs)
-        XCTAssertEqual(blank.seasonBudget, season.seasonBudget)
+        XCTAssertEqual(blank.seasonBudgets, season.seasonBudgets)
+        XCTAssertEqual(blank.programBudgets, season.programBudgets)
+        XCTAssertEqual(blank.expenses, season.expenses, "expenses belong to a season, so they're kept")
         XCTAssertTrue(blank.sessions.isEmpty)
         XCTAssertTrue(blank.events.isEmpty)
-        XCTAssertTrue(blank.expenses.isEmpty)
         XCTAssertTrue(blank.docs.isEmpty)
         XCTAssertTrue(blank.combineResults.isEmpty)
         XCTAssertEqual(blank.bodyMeasurements, season.bodyMeasurements, "height and weight history belongs to the athlete, not the season")
