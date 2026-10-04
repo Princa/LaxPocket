@@ -4,7 +4,9 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var firstName: String
     public var classYear: Int?
     public var positions: String
-    public var benchmarkGroup: BenchmarkGroup
+    /// The NDTP age group the athlete trains with, for scoring combine results against its standards. Nil when they
+    /// aren't on an NDTP team.
+    public var benchmarkGroup: BenchmarkGroup?
     public var mentalCoachName: String
     public var weeklyGoalHours: Double
     /// Season label, e.g. "2026/27".
@@ -14,7 +16,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     /// Canadian dollars per US dollar, for expenses paid in US dollars and for showing the budget in US dollars.
     public var usdToCAD: Double
 
-    public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
+    public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup? = nil, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
                 bodyUnits: BodyUnits = .imperial, usdToCAD: Double = ExchangeRate.defaultUSDToCAD) {
         self.firstName = firstName
         self.classYear = classYear
@@ -38,7 +40,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         firstName = try c.decode(String.self, forKey: .firstName)
         classYear = try c.decodeIfPresent(Int.self, forKey: .classYear)
         positions = try c.decode(String.self, forKey: .positions)
-        benchmarkGroup = try c.decode(BenchmarkGroup.self, forKey: .benchmarkGroup)
+        benchmarkGroup = try c.decodeIfPresent(BenchmarkGroup.self, forKey: .benchmarkGroup)
         mentalCoachName = try c.decode(String.self, forKey: .mentalCoachName)
         weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
         season = try c.decode(String.self, forKey: .season)
@@ -177,7 +179,7 @@ public struct AppData: Codable, Equatable, Sendable {
     /// Stand-in shown while no profile exists yet. Never saved.
     public static let placeholder = AppData(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
-        profile: AthleteProfile(firstName: "", classYear: nil, positions: "", benchmarkGroup: .u15Women, season: AthleteProfile.seasonLabel(for: Date()))
+        profile: AthleteProfile(firstName: "", classYear: nil, positions: "", season: AthleteProfile.seasonLabel(for: Date()))
     )
 
     /// Name and theme, for the profile list.

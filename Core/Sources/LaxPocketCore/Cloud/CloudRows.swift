@@ -25,7 +25,8 @@ public struct ProfileRow: CloudRow {
     public var firstName: String
     public var classYear: Int?
     public var positions: String
-    public var benchmarkGroup: BenchmarkGroup
+    /// Null: not on an NDTP team.
+    public var benchmarkGroup: BenchmarkGroup?
     public var mentalCoachName: String
     public var weeklyGoalHours: Double
     public var seasonLabel: String
@@ -51,7 +52,7 @@ extension ProfileRow {
         firstName = try c.decode(String.self, forKey: .firstName)
         classYear = try c.decodeIfPresent(Int.self, forKey: .classYear)
         positions = try c.decode(String.self, forKey: .positions)
-        benchmarkGroup = try c.decode(BenchmarkGroup.self, forKey: .benchmarkGroup)
+        benchmarkGroup = try c.decodeIfPresent(BenchmarkGroup.self, forKey: .benchmarkGroup)
         mentalCoachName = try c.decode(String.self, forKey: .mentalCoachName)
         weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
         seasonLabel = try c.decode(String.self, forKey: .seasonLabel)

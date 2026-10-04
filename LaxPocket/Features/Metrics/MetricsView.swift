@@ -8,12 +8,13 @@ struct MetricsView: View {
     @State private var useNextGroup = false
     @State private var resultID: UUID?
     @State private var showAdd = false
+    /// An age group to compare against, for an athlete who isn't on an NDTP team. Not saved.
+    @State private var pickedGroup: BenchmarkGroup?
 
     var body: some View {
         let results = store.data.combineResults.sorted { $0.date > $1.date }
         let result = results.first { $0.id == resultID } ?? results.first
-        let baseGroup = store.profile.benchmarkGroup
-        let group = useNextGroup ? (baseGroup.next ?? baseGroup) : baseGroup
+        let baseGroup = store.profile.benchmarkGroup ?? pickedGroup
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -32,13 +33,21 @@ struct MetricsView: View {
 
                 if let result {
                     header(result: result, all: results)
-                    groupPicker(base: baseGroup)
-                    content(result: result, group: group)
+                    if let baseGroup {
+                        groupPicker(base: baseGroup)
+                        if store.profile.benchmarkGroup == nil {
+                            Text("Not on an NDTP team, so this compares against \(baseGroup.title) for now. Set an NDTP team in the athlete profile to keep it.")
+                                .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
+                        content(result: result, group: useNextGroup ? (baseGroup.next ?? baseGroup) : baseGroup)
+                    } else {
+                        chooseGroupCard
+                    }
                 } else {
                     Card {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No combine results yet").font(.system(size: 17, weight: .semibold))
-                            Text("Add a testing day to see where each result sits against the NDTP standards for \(baseGroup.title).")
+                            Text("Add a testing day to see where each result sits against the NDTP standards\(baseGroup.map { " for \($0.title)" } ?? "").")
                                 .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
                             Button("Add results") { showAdd = true }
                                 .buttonStyle(PrimaryButtonStyle(color: theme.primary))
@@ -61,6 +70,26 @@ struct MetricsView: View {
     }
 
     // MARK: - Pieces
+
+    /// For an athlete who isn't on an NDTP team: pick an age group to score the results against.
+    private var chooseGroupCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Compare against the NDTP standards").font(.system(size: 17, weight: .semibold))
+                Text("\(store.data.summary.displayName) isn't on an NDTP team. Pick an age group to see where each result sits, or set an NDTP team in the athlete profile.")
+                    .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                Menu {
+                    ForEach(BenchmarkGroup.allCases) { group in
+                        Button(group.title) { pickedGroup = group }
+                    }
+                } label: {
+                    Label("Choose an age group", systemImage: "chevron.down")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
 
     private func header(result: CombineResult, all: [CombineResult]) -> some View {
         VStack(alignment: .leading, spacing: 4) {

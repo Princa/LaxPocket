@@ -29,9 +29,6 @@ struct AthleteProfileView: View {
                 TextField("Class of", value: binding(\.profile.classYear), format: .number.grouping(.never))
                     .keyboardType(.numberPad)
                 TextField("Positions, e.g. Midfield / Attack", text: binding(\.profile.positions))
-                Picker("NDTP standards", selection: binding(\.profile.benchmarkGroup)) {
-                    ForEach(BenchmarkGroup.allCases) { Text($0.title).tag($0) }
-                }
                 TextField("Mental coach's name", text: binding(\.profile.mentalCoachName))
             }
 
@@ -43,10 +40,11 @@ struct AthleteProfileView: View {
                 Button { editingClub = ClubTarget() } label: {
                     Label("Add a club or team", systemImage: "plus")
                 }
+                NDTPPicker(group: Binding(get: { store.profile.benchmarkGroup }, set: { group in store.update { $0.setNDTPGroup(group) } }))
             } header: {
                 Text("Clubs & teams")
             } footer: {
-                Text("Add every team \(name) plays for: club, school, box, provincial. Each one shows up in Log session and when you add a game.")
+                Text("Add every team \(name) plays for: club, school, box, provincial. Each one shows up in Log session and when you add a game. Picking an NDTP age group adds NDTP as a team and scores combine results against that group's standards.")
             }
 
             Section("Height & weight") {
