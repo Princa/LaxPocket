@@ -12,6 +12,9 @@ struct TripView: View {
     /// The trip as it was when Edit was tapped, so the sheet keeps it while it closes after a delete.
     @State private var editingTrip: Trip?
 
+    /// An athlete's own login sees the budget but doesn't change it.
+    private var canEdit: Bool { store.data.canWrite(.budget) }
+
     var body: some View {
         Group {
             if let trip = store.trip(tripID) {
@@ -24,7 +27,7 @@ struct TripView: View {
         .background(AppTheme.background)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let trip = store.trip(tripID) {
+            if let trip = store.trip(tripID), canEdit {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Edit") { editingTrip = trip }
                 }
@@ -102,7 +105,8 @@ struct TripView: View {
                 SectionHeader(title: "Expenses").padding(.top, 8)
                 if summary.expenses.isEmpty {
                     Card {
-                        Text("Nothing recorded yet. Tap + next to a cost above to add the entry fee, gas, flights, hotel or meals.")
+                        Text(canEdit ? "Nothing recorded yet. Tap + next to a cost above to add the entry fee, gas, flights, hotel or meals."
+                                     : "Nothing recorded yet.")
                             .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
                     }
                 } else {
@@ -113,20 +117,25 @@ struct TripView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal, 14)
+                            .allowsHitTesting(canEdit)
                             .contextMenu {
-                                Button { editing = ExpenseEditTarget(expense: expense, season: expense.season) } label: { Label("Edit", systemImage: "pencil") }
-                                Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
+                                if canEdit {
+                                    Button { editing = ExpenseEditTarget(expense: expense, season: expense.season) } label: { Label("Edit", systemImage: "pencil") }
+                                    Button(role: .destructive) { store.deleteExpenses([expense.id]) } label: { Label("Delete", systemImage: "trash") }
+                                }
                             }
                             if index < summary.expenses.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
                         }
                     }
                 }
 
-                Button { editing = newExpense(trip, category: nil) } label: {
-                    Label("Add expense", systemImage: "plus")
+                if canEdit {
+                    Button { editing = newExpense(trip, category: nil) } label: {
+                        Label("Add expense", systemImage: "plus")
+                    }
+                    .buttonStyle(PrimaryButtonStyle(color: theme.primary))
+                    .padding(.top, 8)
                 }
-                .buttonStyle(PrimaryButtonStyle(color: theme.primary))
-                .padding(.top, 8)
 
                 if !trip.note.isEmpty {
                     SectionHeader(title: "Notes").padding(.top, 8)
@@ -217,11 +226,13 @@ struct TripView: View {
             Text(amount > 0 ? store.money(amount) : "—")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(amount > 0 ? AppTheme.ink : AppTheme.caption)
-            Button { editing = newExpense(summary.trip, category: category) } label: {
-                Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(theme.primary)
+            if canEdit {
+                Button { editing = newExpense(summary.trip, category: category) } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(theme.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Add \(category.tripTitle.lowercased())")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Add \(category.tripTitle.lowercased())")
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)

@@ -17,6 +17,20 @@ final class CloudStore {
     private(set) var lastError: String?
     /// Athletes in the cloud that aren't on this iPhone.
     private(set) var remoteOnly: [ProfileRow] = []
+    /// Athletes on this iPhone that this account used to sync but can't any more: the owner took this account off them,
+    /// or deleted them from the cloud.
+    private(set) var noLongerShared: Set<UUID> = []
+    /// The signed-in account's name and whether it's a parent, athlete or coach. Nil until loaded or set up.
+    private(set) var account: AccountRow?
+    /// True once it's known that the signed-in account hasn't said who it is yet.
+    private(set) var needsAccountSetup = false
+    /// The rosters this account coaches.
+    private(set) var rosters: [RosterRow] = []
+
+    /// Shows the Coaching workspace: the account is a coach or mental coach, or already has a roster.
+    var isCoaching: Bool {
+        isSignedIn && (!rosters.isEmpty || account.map { [.coach, .mentalCoach].contains($0.kind) } == true)
+    }
     /// What happened when the app was opened from a confirmation email; shown once, then cleared.
     var authNotice: String?
     /// True while Cloud sync is on screen, which shows `authNotice` itself.
@@ -128,6 +142,10 @@ final class CloudStore {
         sessionChanged(nil)
         for profile in appStore.profiles { try? appStore.library.removeSyncBase(profile.id) }
         remoteOnly = []
+        noLongerShared = []
+        account = nil
+        needsAccountSetup = false
+        rosters = []
         lastSynced = nil
         lastError = nil
     }
@@ -158,12 +176,18 @@ final class CloudStore {
             syncAgain = false
             let cloud = CloudSync(client: client)
             var firstError: Error?
-            // One athlete failing (say, a view-only one with local edits) doesn't hold up the rest.
+            // One athlete failing (say, one with an edit the cloud refuses) doesn’t hold up the rest.
             // The demo athlete (debug builds) stays on this iPhone.
-            for summary in appStore.profiles where summary.id != DemoSeason.profileID {
+            for summary in appStore.profiles where summary.id != DemoSeason.profileID && !noLongerShared.contains(summary.id) {
                 do {
                     try await sync(summary.id, using: cloud)
                 } catch {
+                    // It synced before and the cloud no longer shows it to this account, so uploading it again was refused.
+                    if case CloudError.server(_, "42501", _) = error, appStore.library.loadSyncBase(summary.id) != nil,
+                       case .some(.none) = try? await cloud.snapshot(profileID: summary.id) {
+                        noLongerShared.insert(summary.id)
+                        continue
+                    }
                     firstError = firstError ?? error
                     print("LaxPocket: sync of \(summary.displayName) failed – \(error)")
                 }
@@ -176,6 +200,8 @@ final class CloudStore {
                     for row in remoteOnly { try await download(row.id, using: cloud) }
                     remoteOnly = []
                 }
+                if account == nil { await loadAccount(using: cloud) }
+                if let mine = try? await cloud.rosters() { rosters = mine }
                 if let firstError { throw firstError }
                 lastSynced = Date()
                 lastError = nil
@@ -230,6 +256,144 @@ final class CloudStore {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Takes an athlete this account lost access to off this iPhone.
+    func removeFromThisPhone(_ id: UUID) {
+        try? appStore.library.removeSyncBase(id)
+        appStore.deleteProfile(id)
+        noLongerShared.remove(id)
+    }
+
+    // MARK: - Account and people
+
+    private func loadAccount(using cloud: CloudSync) async {
+        guard let userID = session?.userID else { return }
+        do {
+            account = try await cloud.account(userID: userID)
+            needsAccountSetup = account == nil
+        } catch {
+            print("LaxPocket: couldn't load the account – \(error)")
+        }
+    }
+
+    /// Saves who the signed-in account is: the name others on an athlete see, and parent, athlete or coach.
+    func saveAccount(name: String, kind: Relationship) async throws {
+        guard let client, let userID = session?.userID else { return }
+        let row = AccountRow(userID: userID, displayName: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind)
+        try await CloudSync(client: client).saveAccount(row)
+        account = row
+        needsAccountSetup = false
+    }
+
+    func people(on id: UUID) async throws -> [ProfilePerson] {
+        guard let client else { return [] }
+        return try await CloudSync(client: client).people(profileID: id, me: session?.userID)
+    }
+
+    func openInvites(for id: UUID) async throws -> [InviteRow] {
+        guard let client else { return [] }
+        return try await CloudSync(client: client).openInvites(profileID: id)
+    }
+
+    /// Makes an invite code for an athlete. The athlete is synced first, so it's in the cloud to be joined.
+    func invite(to id: UUID, as relationship: Relationship) async throws -> String {
+        guard let client else { throw CloudError.notSignedIn }
+        await syncNow()
+        return try await CloudSync(client: client).createInvite(profileID: id, relationship: relationship)
+    }
+
+    func cancelInvite(_ code: String) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).cancelInvite(code: code)
+    }
+
+    /// Takes someone off an athlete (owner only).
+    func remove(_ userID: UUID, from id: UUID) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).removeMember(profileID: id, userID: userID)
+    }
+
+    /// Takes this account off an athlete it doesn't own, and the athlete off this iPhone.
+    func leave(_ id: UUID) async throws {
+        guard let client, let userID = session?.userID else { return }
+        try await CloudSync(client: client).removeMember(profileID: id, userID: userID)
+        removeFromThisPhone(id)
+    }
+
+    /// Joins an athlete with an invite code, brings them onto this iPhone and switches to them.
+    func join(code: String) async throws {
+        guard let client else { throw CloudError.notSignedIn }
+        let cloud = CloudSync(client: client)
+        let id = try await cloud.acceptInvite(code: code)
+        noLongerShared.remove(id)
+        try await download(id, using: cloud)
+        remoteOnly.removeAll { $0.id == id }
+        appStore.switchProfile(to: id)
+    }
+
+    // MARK: - Codes and coaches
+
+    /// What a code is for, before using it.
+    func describe(code: String) async throws -> CodeInfo {
+        guard let client else { throw CloudError.notSignedIn }
+        return try await CloudSync(client: client).describeCode(code)
+    }
+
+    /// Adds an athlete on this iPhone to a coach's roster. The athlete is synced first, so it's in the cloud.
+    func addToRoster(code: String, athlete id: UUID) async throws {
+        guard let client else { throw CloudError.notSignedIn }
+        await syncNow()
+        _ = try await CloudSync(client: client).joinRoster(code: code, profileID: id)
+    }
+
+    func coaches(of id: UUID) async throws -> [AthleteCoachRow] {
+        guard let client else { return [] }
+        return try await CloudSync(client: client).athleteCoaches(profileID: id)
+    }
+
+    func removeFromRoster(_ rosterID: UUID, athlete id: UUID) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).removeFromRoster(rosterID: rosterID, profileID: id)
+    }
+
+    func setMentalCoachTrust(athlete id: UUID, coach coachID: UUID, trusted: Bool) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).setMentalCoachTrust(profileID: id, coachID: coachID, trusted: trusted)
+    }
+
+    // MARK: - Coaching
+
+    /// Every roster with what this account can see of each athlete, read fresh from the cloud.
+    func coachWorkspace() async throws -> [CoachRoster] {
+        guard let client else { throw CloudError.notSignedIn }
+        let workspace = try await CloudSync(client: client).coachWorkspace()
+        rosters = workspace.map { RosterRow(id: $0.id, kind: $0.kind, name: $0.name, joinCode: $0.joinCode) }
+        return workspace
+    }
+
+    func createRoster(name: String, kind: RosterKind) async throws {
+        guard let client else { throw CloudError.notSignedIn }
+        let cloud = CloudSync(client: client)
+        _ = try await cloud.createRoster(name: name, kind: kind)
+        rosters = try await cloud.rosters()
+    }
+
+    func renameRoster(_ id: UUID, to name: String) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).renameRoster(id, to: name)
+    }
+
+    /// A new code (the old one stops working), or none to close the roster to new athletes.
+    func resetRosterCode(_ id: UUID, open: Bool) async throws -> String? {
+        guard let client else { return nil }
+        return try await CloudSync(client: client).resetRosterCode(id, open: open)
+    }
+
+    func deleteRoster(_ id: UUID) async throws {
+        guard let client else { return }
+        try await CloudSync(client: client).deleteRoster(id)
+        rosters.removeAll { $0.id == id }
     }
 
     /// Lets another LaxPocket account see (or also edit) an athlete.

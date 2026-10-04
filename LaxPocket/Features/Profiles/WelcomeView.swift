@@ -40,7 +40,7 @@ struct WelcomeView: View {
                 .buttonStyle(PrimaryButtonStyle(color: theme.primary))
                 .padding(.top, 6)
                 if cloud.isConfigured {
-                    Button("Already use LaxPocket? Sign in to bring your athletes over") { showCloud = true }
+                    Button("Have an account or an invite code? Sign in") { showCloud = true }
                         .font(.system(size: 14, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }

@@ -27,4 +27,23 @@ backend (`supabase/`). See README.md for what each screen does.
 - Schema changes are a new file in `supabase/migrations` (never edit an applied one), with matching row types in
   `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`, checks in `supabase/tests/rls_test.sql`, and a note in
   `docs/supabase.md`.
+- Migrations are pasted into the Supabase SQL Editor, and the live project can differ from what the earlier migrations
+  create (a policy removed in the dashboard, say). So a migration must not depend on objects already being there:
+  replace a policy with `drop policy if exists` + `create policy`, never `alter policy`; use `if not exists` and
+  `create or replace`, so the file can be run again after a failed attempt. Test it against a database with an
+  earlier object missing, not just a fresh one.
+- When the user needs to apply a migration, put it on their clipboard with `pbcopy < supabase/migrations/<file>.sql`
+  (and check it with `pbpaste | cmp - <file>`) instead of asking them to copy it by hand: a hand-copied file once lost
+  its closing `);` line.
+- Who sees what is defined twice and must change together: `private.readable_sections` / `writable_sections` (family
+  accounts migration) and `private.roster_sections` (coach rosters migration), and `Relationship` / `RosterKind` in
+  `Core/Sources/LaxPocketCore/Access.swift` and `Coaching.swift`. A locked mental doc is readable only by the
+  account in `locked_by` and the mental coaches that account trusts, never by relationship, because the owner
+  controls who's linked. Mental sessions are in the mental section, so a team coach never sees them.
+- Coaches read athletes live through `CloudSync.coachWorkspace`; never sync a coached athlete onto the coach's phone.
 - The repo holds no personal data; test fixtures use made-up numbers.
+
+## Keeping this file current
+
+When something goes wrong that a rule here would have prevented, or the user states how they want things done, add
+or update a line here in the same change.

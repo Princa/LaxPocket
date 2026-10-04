@@ -168,17 +168,22 @@ final class CloudSyncIntegrationTests: XCTestCase {
         let again = ProfileMerge.merge(base: phoneBase, local: ProfileSnapshot(final), remote: cloud)
         XCTAssertTrue(again.changes.isEmpty)
 
-        // 6. Another account can't see it until it's shared, and a viewer can't change it.
+        // 6. Another account can't see it until it's shared, and a viewer's changes don't reach the cloud.
         let other = await sync(tokenB)
         let hidden = try await other.snapshot(profileID: season.id)
         XCTAssertNil(hidden)
         try await phone.share(profileID: season.id, email: emailB, role: .viewer)
         let shared = try await other.snapshot(profileID: season.id)
         assertSame(shared, cloud)
+        XCTAssertEqual(shared?.access, ProfileAccess(role: .viewer, relationships: [.parent]))
         var viewerEdit = final
         viewerEdit.sessions[0].minutes = 5
+        let viewerSynced = try await other.sync(local: viewerEdit, base: shared)
+        XCTAssertEqual(viewerSynced.appData.sessions.first { $0.id == season.sessions[0].id }?.minutes, 75, "the cloud's copy wins")
+        let afterViewer = try await phone.snapshot(profileID: season.id)
+        assertSame(afterViewer, cloud)
         do {
-            _ = try await other.sync(local: viewerEdit, base: cloud)
+            try await other.push({ var c = SyncChanges(profileID: season.id); c.sessions.upserts = ProfileSnapshot(viewerEdit).sessions; return c }())
             XCTFail("a viewer can't write")
         } catch {
             XCTAssertEqual(error.localizedDescription, "This account can’t change that athlete (view-only access).")
@@ -192,5 +197,117 @@ final class CloudSyncIntegrationTests: XCTestCase {
         try await phone.deleteProfile(season.id)
         let gone = try await phone.snapshot(profileID: season.id)
         XCTAssertNil(gone)
+    }
+
+    /// The account a test token signs in as (the JWT's subject).
+    private func userID(_ token: String) throws -> UUID {
+        var payload = String(token.split(separator: ".")[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        let claims = try JSONSerialization.jsonObject(with: XCTUnwrap(Data(base64Encoded: payload))) as? [String: Any]
+        return try XCTUnwrap((claims?["sub"] as? String).flatMap(UUID.init(uuidString:)))
+    }
+
+    func testCoachRosterSeesTrainingAndEventsOnly() async throws {
+        let season = Fixtures.season(name: "E2E coached \(UUID().uuidString.prefix(6))")
+        let parent = await sync(tokenA)
+        let coach = await sync(tokenB)
+        let now = Fixtures.day(3, hour: 20)
+        _ = try await parent.sync(local: season, base: nil)
+
+        // 1. The coach makes a roster; the parent checks the code, then adds the athlete.
+        try await coach.saveAccount(AccountRow(userID: try userID(tokenB), displayName: "Coach B", kind: .coach))
+        let rosterID = try await coach.createRoster(name: "E2E U15", kind: .team)
+        let made = try await coach.rosters()
+        let code = try XCTUnwrap(made.first { $0.id == rosterID }?.joinCode)
+        let info = try await parent.describeCode(code.lowercased())
+        XCTAssertEqual(info, .roster(name: "E2E U15", kind: .team, coachName: "Coach B"))
+        let joined = try await parent.joinRoster(code: code, profileID: season.id)
+        XCTAssertEqual(joined, rosterID)
+        let coaches = try await parent.athleteCoaches(profileID: season.id)
+        XCTAssertEqual(coaches.map(\.rosterID), [rosterID])
+        XCTAssertEqual(coaches.first?.displayName, "Coach B")
+        XCTAssertEqual(coaches.first?.canOpenLocked, false)
+
+        // 2. The coach reads training and events, and nothing else.
+        let rosters = try await coach.coachWorkspace(now: now)
+        let athlete = try XCTUnwrap(rosters.first { $0.id == rosterID }?.athletes.first)
+        XCTAssertEqual(athlete.data.profile.firstName, season.profile.firstName)
+        XCTAssertEqual(Set(athlete.data.sessions.map(\.id)), Set(season.sessions.map(\.id)))
+        XCTAssertEqual(athlete.data.wallballSessions.map(\.reps.total).sorted(), season.wallballSessions.map(\.reps.total).sorted())
+        XCTAssertEqual(athlete.data.events.count, 2)
+        XCTAssertEqual(athlete.data.events.first { $0.id == season.events[0].id }?.focus.count, 2)
+        XCTAssertTrue(athlete.data.expenses.isEmpty && athlete.data.trips.isEmpty && athlete.data.bodyMeasurements.isEmpty)
+        XCTAssertTrue(athlete.data.docs.isEmpty && athlete.data.lockedDocs.isEmpty)
+        XCTAssertEqual(athlete.week(now: now).lastResult?.title, "vs Rivals")
+
+        // 3. A new code stops the old one; the roster can close; the parent takes the athlete off.
+        let fresh = try await coach.resetRosterCode(rosterID, open: true)
+        XCTAssertNotEqual(fresh, code)
+        let closed = try await coach.resetRosterCode(rosterID, open: false)
+        XCTAssertNil(closed)
+        do {
+            _ = try await parent.describeCode(code)
+            XCTFail("the old code stopped working")
+        } catch {}
+        try await parent.removeFromRoster(rosterID: rosterID, profileID: season.id)
+        let after = try await coach.coachWorkspace(now: now)
+        XCTAssertEqual(after.first { $0.id == rosterID }?.athletes.count, 0)
+
+        try await coach.deleteRoster(rosterID)
+        try await parent.deleteProfile(season.id)
+    }
+
+    func testAthleteJoinsWithACodeAndLocksADoc() async throws {
+        let season = Fixtures.season(name: "E2E family \(UUID().uuidString.prefix(6))")
+        let parent = await sync(tokenA)
+        let athlete = await sync(tokenB)
+        let parentID = try userID(tokenA), athleteID = try userID(tokenB)
+        var parentBase = try await parent.sync(local: season, base: nil)
+
+        // 1. The parent invites the athlete's own login, and the athlete types the code in.
+        let code = try await parent.createInvite(profileID: season.id, relationship: .athlete)
+        let open = try await parent.openInvites(profileID: season.id)
+        XCTAssertEqual(open.map(\.code), [code])
+        let joined = try await athlete.acceptInvite(code: code.lowercased())
+        XCTAssertEqual(joined, season.id)
+        let stillOpen = try await parent.openInvites(profileID: season.id)
+        XCTAssertTrue(stillOpen.isEmpty, "a used code isn't open")
+        try await athlete.saveAccount(AccountRow(userID: athleteID, displayName: "Sam", kind: .athlete))
+        let account = try await athlete.account(userID: athleteID)
+        XCTAssertEqual(account?.kind, .athlete)
+        let people = try await parent.people(profileID: season.id, me: parentID)
+        XCTAssertEqual(people.map(\.access.role), [.owner, .editor])
+        XCTAssertEqual(people.last?.displayName, "Sam")
+        XCTAssertEqual(people.last?.access.relationships, [.athlete])
+        XCTAssertEqual(people.first?.isMe, true)
+
+        // 2. The athlete logs training, tries to change the budget, and locks the doc.
+        let downloaded = try await athlete.snapshot(profileID: season.id)
+        var athleteBase = try XCTUnwrap(downloaded)
+        XCTAssertEqual(athleteBase.access, ProfileAccess(role: .editor, relationships: [.athlete]))
+        var athleteData = athleteBase.appData
+        athleteData.sessions[0].minutes = 100
+        athleteData.expenses[0].amount = 1
+        athleteData.docs[0].visibility = .locked
+        athleteBase = try await athlete.sync(local: athleteData, base: athleteBase)
+        XCTAssertEqual(athleteBase.docs.map(\.visibility), [.locked])
+        XCTAssertEqual(athleteBase.appData.expenses.first { $0.id == season.expenses[0].id }?.amount, 1850, "athletes don't change the budget")
+
+        // 3. The parent changed the doc meanwhile: the change is dropped and they see a placeholder instead.
+        var parentData = parentBase.appData
+        parentData.docs[0].status = .reviewed
+        parentBase = try await parent.sync(local: parentData, base: parentBase)
+        XCTAssertTrue(parentBase.docs.isEmpty)
+        XCTAssertEqual(parentBase.lockedDocs.map(\.id), [season.docs[0].id])
+        XCTAssertEqual(parentBase.appData.sessions.first { $0.id == season.sessions[0].id }?.minutes, 100)
+        let athleteView = try await athlete.snapshot(profileID: season.id)
+        XCTAssertEqual(athleteView?.docs.first?.status, .toReview, "the parent's change didn't reach the locked doc")
+        XCTAssertEqual(athleteView?.lockedDocs, [], "the athlete gets the doc itself")
+
+        // 4. The parent unlinks the athlete's login, then deletes the athlete.
+        try await parent.removeMember(profileID: season.id, userID: athleteID)
+        let unlinked = try await athlete.snapshot(profileID: season.id)
+        XCTAssertNil(unlinked)
+        try await parent.deleteProfile(season.id)
     }
 }

@@ -15,6 +15,8 @@ final class AppStore {
     private(set) var index: ProfileIndex
     /// Which tab is showing (not saved).
     var selectedTab: AppTab = .home
+    /// A parent who also coaches is looking at Coaching rather than their own athletes.
+    var showsCoaching = false
     /// The currency the budget screens show amounts in, on this device. Amounts are stored and added up in CAD.
     var displayCurrency: Currency = AppStore.savedDisplayCurrency {
         didSet { UserDefaults.standard.set(displayCurrency.rawValue, forKey: AppStore.displayCurrencyKey) }
@@ -286,6 +288,13 @@ final class AppStore {
     func setDocStatus(_ id: UUID, _ status: DocStatus) {
         update { data in
             if let index = data.docs.firstIndex(where: { $0.id == id }) { data.docs[index].status = status }
+        }
+    }
+
+    /// Only the athlete's own login can lock or hide a doc; the cloud refuses it from anyone else.
+    func setDocVisibility(_ id: UUID, _ visibility: DocVisibility) {
+        update { data in
+            if let index = data.docs.firstIndex(where: { $0.id == id }) { data.docs[index].visibility = visibility }
         }
     }
 

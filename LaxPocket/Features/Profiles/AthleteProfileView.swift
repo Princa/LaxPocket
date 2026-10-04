@@ -47,15 +47,17 @@ struct AthleteProfileView: View {
                 Text("Add every team \(name) plays for: club, school, box, provincial. Each one shows up in Log session and when you add a game. Picking an NDTP age group adds NDTP as a team and scores combine results against that group's standards.")
             }
 
-            Section("Height & weight") {
-                NavigationLink { HealthView() } label: {
-                    LabeledContent("Latest", value: BodyTrends.summary(store.data.bodyMeasurements, units: store.profile.bodyUnits) ?? "Not logged")
-                }
-                Picker("Units", selection: binding(\.profile.bodyUnits)) {
-                    ForEach(BodyUnits.allCases) { Text($0.title).tag($0) }
-                }
-                Button { showLogBody = true } label: {
-                    Label("Log height & weight", systemImage: "plus")
+            if store.data.canRead(.health) {
+                Section("Height & weight") {
+                    NavigationLink { HealthView() } label: {
+                        LabeledContent("Latest", value: BodyTrends.summary(store.data.bodyMeasurements, units: store.profile.bodyUnits) ?? "Not logged")
+                    }
+                    Picker("Units", selection: binding(\.profile.bodyUnits)) {
+                        ForEach(BodyUnits.allCases) { Text($0.title).tag($0) }
+                    }
+                    Button { showLogBody = true } label: {
+                        Label("Log height & weight", systemImage: "plus")
+                    }
                 }
             }
 

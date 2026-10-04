@@ -80,7 +80,7 @@ struct ProgramsView: View {
 
         Group {
             switch group {
-            case .mental:
+            case .mental where store.data.canRead(.mental):
                 NavigationLink { MindsetView() } label: { content }.buttonStyle(.plain)
             case .combine:
                 Button { store.selectedTab = .metrics } label: { content }.buttonStyle(.plain)

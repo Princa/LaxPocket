@@ -150,7 +150,7 @@ struct GameDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-        } else {
+        } else if store.data.canWrite(.budget) {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Track the entry fee, travel, hotel and food for this \(event.kind.title.lowercased()) as one trip in the Budget.")

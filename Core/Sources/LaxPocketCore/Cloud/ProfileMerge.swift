@@ -51,6 +51,9 @@ public struct SyncChanges: Hashable, Sendable {
 /// - Deleted on one side, edited on the other → the edit wins, so nothing typed in is lost.
 ///
 /// An event, a testing day or a wall ball session merges as one unit with everything under it.
+///
+/// What the account can do with the athlete (`remote.access`) limits the merge: sections it can't read are dropped from
+/// this device, sections it can only read take the cloud's copy, and nothing is written that the cloud would refuse.
 public enum ProfileMerge {
     public struct Outcome: Hashable, Sendable {
         /// What both sides hold once `changes` are written. Becomes the new local data and the new base.
@@ -61,7 +64,7 @@ public enum ProfileMerge {
 
     /// Pass `remote: nil` when the profile isn't in the cloud (never uploaded, or removed there): everything local is uploaded.
     public static func merge(base: ProfileSnapshot?, local: ProfileSnapshot, remote: ProfileSnapshot?) -> Outcome {
-        guard let remote else {
+        guard var remote else {
             var changes = SyncChanges(profileID: local.profile.id)
             changes.profile = local.profile
             changes.programs.upserts = local.programs
@@ -79,6 +82,41 @@ public enum ProfileMerge {
             return Outcome(merged: local, changes: changes)
         }
 
+        var base = base, local = local
+        if let access = remote.access {
+            for section in ProfileSection.allCases where !access.canRead(section) {
+                base = base?.replacing(section, from: nil)
+                local = local.replacing(section, from: nil)
+                remote = remote.replacing(section, from: nil)
+            }
+            for section in ProfileSection.allCases where access.canRead(section) && !access.canWrite(section) {
+                local = local.replacing(section, from: remote)
+            }
+            if !access.canEditProfile { local.profile = remote.profile }
+            if !access.canLockDocs { dropDocsClosedToThisAccount(base: base, local: &local, remote: remote) }
+        }
+
+        var outcome = mergeRows(base: base, local: local, remote: remote)
+        if let access = remote.access {
+            for section in ProfileSection.allCases where !access.canWrite(section) { outcome.changes.clear(section) }
+            if !access.canEditProfile { outcome.changes.profile = nil }
+        }
+        outcome.merged.lockedDocs = remote.lockedDocs
+        outcome.merged.access = remote.access
+        return outcome
+    }
+
+    /// A doc the athlete locked or hid disappears from what this account can read. The cloud would refuse any change
+    /// to it from here, so it leaves this device even if it was edited here: a doc that's now locked, or one that was
+    /// here at the last sync and isn't in the cloud any more.
+    static func dropDocsClosedToThisAccount(base: ProfileSnapshot?, local: inout ProfileSnapshot, remote: ProfileSnapshot) {
+        let locked = Set(remote.lockedDocs.map(\.id))
+        let inCloud = Set(remote.docs.map(\.id))
+        let atLastSync = Set(base?.docs.map(\.id) ?? [])
+        local.docs.removeAll { locked.contains($0.id) || (atLastSync.contains($0.id) && !inCloud.contains($0.id)) }
+    }
+
+    static func mergeRows(base: ProfileSnapshot?, local: ProfileSnapshot, remote: ProfileSnapshot) -> Outcome {
         var changes = SyncChanges(profileID: local.profile.id)
         let profile = rows(base: base.map { [$0.profile] } ?? [], local: [local.profile], remote: [remote.profile], key: \.id)
         // The profile row is never deleted by a sync, so there is always one.
@@ -182,5 +220,58 @@ public enum ProfileMerge {
             if let result { outcome.merged.append(result) }
         }
         return outcome
+    }
+}
+
+extension ProfileSnapshot {
+    /// The same snapshot with one section's rows taken from `other`, or emptied when `other` is nil.
+    func replacing(_ section: ProfileSection, from other: ProfileSnapshot?) -> ProfileSnapshot {
+        var copy = self
+        switch section {
+        case .training:
+            copy.programs = other?.programs ?? []
+            copy.sessions = other?.sessions ?? []
+            copy.combineResults = other?.combineResults ?? []
+            copy.wallballDrills = other?.wallballDrills ?? []
+            copy.wallballSessions = other?.wallballSessions ?? []
+        case .events:
+            copy.events = other?.events ?? []
+        case .health:
+            copy.bodyMeasurements = other?.bodyMeasurements ?? []
+        case .budget:
+            copy.expenses = other?.expenses ?? []
+            copy.trips = other?.trips ?? []
+            copy.seasonBudgets = other?.seasonBudgets ?? []
+            copy.programBudgets = other?.programBudgets ?? []
+        case .mental:
+            copy.docs = other?.docs ?? []
+            copy.lockedDocs = other?.lockedDocs ?? []
+        }
+        return copy
+    }
+}
+
+extension SyncChanges {
+    /// Writes nothing for a section.
+    mutating func clear(_ section: ProfileSection) {
+        switch section {
+        case .training:
+            programs = .init()
+            sessions = .init()
+            combineResults = .init()
+            wallballDrills = .init()
+            wallballSessions = .init()
+        case .events:
+            events = .init()
+        case .health:
+            bodyMeasurements = .init()
+        case .budget:
+            expenses = .init()
+            trips = .init()
+            seasonBudgets = .init()
+            programBudgets = .init()
+        case .mental:
+            docs = .init()
+        }
     }
 }
