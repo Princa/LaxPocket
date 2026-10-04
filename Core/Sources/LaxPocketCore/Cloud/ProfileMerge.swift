@@ -29,6 +29,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var wallballSessions = TableChanges<WallballBundle, UUID>()
     public var seasonBudgets = TableChanges<SeasonBudgetRow, Int>()
     public var programBudgets = TableChanges<ProgramBudgetRow, ProgramBudgetRow.Key>()
+    public var trips = TableChanges<TripRow, UUID>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -37,6 +38,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
             && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty && seasonBudgets.isEmpty && programBudgets.isEmpty
+            && trips.isEmpty
     }
 }
 
@@ -73,6 +75,7 @@ public enum ProfileMerge {
             changes.wallballSessions.upserts = local.wallballSessions
             changes.seasonBudgets.upserts = local.seasonBudgets
             changes.programBudgets.upserts = local.programBudgets
+            changes.trips.upserts = local.trips
             return Outcome(merged: local, changes: changes)
         }
 
@@ -104,12 +107,38 @@ public enum ProfileMerge {
         changes.seasonBudgets = TableChanges(upserts: seasonBudgets.upserts, deletes: seasonBudgets.deletes)
         let programBudgets = rows(base: base?.programBudgets ?? [], local: local.programBudgets, remote: remote.programBudgets, key: \.key)
         changes.programBudgets = TableChanges(upserts: programBudgets.upserts, deletes: programBudgets.deletes)
+        let trips = rows(base: base?.trips ?? [], local: local.trips, remote: remote.trips, key: \.id)
+        changes.trips = TableChanges(upserts: trips.upserts, deletes: trips.deletes)
 
-        let merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
+        var merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
                                      combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
                                      bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged,
-                                     seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged)
+                                     seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged, trips: trips.merged)
+        dropTripLinksToDeletedRows(&merged, &changes)
         return Outcome(merged: merged, changes: changes)
+    }
+
+    /// A trip or expense edited here while what it points at was deleted on another device would fail its foreign key
+    /// and stop every sync after it. The link is cleared instead, in the merged data and in what's written.
+    static func dropTripLinksToDeletedRows(_ merged: inout ProfileSnapshot, _ changes: inout SyncChanges) {
+        let programIDs = Set(merged.programs.map(\.id))
+        let eventIDs = Set(merged.events.map(\.id))
+        let tripIDs = Set(merged.trips.map(\.id))
+        for index in merged.trips.indices {
+            var trip = merged.trips[index]
+            if let id = trip.programID, !programIDs.contains(id) { trip.programID = nil }
+            if let id = trip.eventID, !eventIDs.contains(id) { trip.eventID = nil }
+            guard trip != merged.trips[index] else { continue }
+            merged.trips[index] = trip
+            changes.trips.upserts.removeAll { $0.id == trip.id }
+            changes.trips.upserts.append(trip)
+        }
+        for index in merged.expenses.indices {
+            guard let id = merged.expenses[index].tripID, !tripIDs.contains(id) else { continue }
+            merged.expenses[index].tripID = nil
+            changes.expenses.upserts.removeAll { $0.id == merged.expenses[index].id }
+            changes.expenses.upserts.append(merged.expenses[index])
+        }
     }
 
     struct RowMerge<Row, Key> {

@@ -2,25 +2,42 @@ import Foundation
 
 public enum ExpenseCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case teamFees
+    case tournamentFees
     case coaching
     case fitness
     case travel
+    case lodging
+    case food
     case showcases
     case equipment
     case facility
+    case other
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .teamFees: return "Team & league fees"
+        case .tournamentFees: return "Tournament fees"
         case .coaching: return "Private coaching"
         case .fitness: return "Strength & fitness"
-        case .travel: return "Travel & lodging"
+        case .travel: return "Travel"
+        case .lodging: return "Hotel & lodging"
+        case .food: return "Food & meals"
         case .showcases: return "Showcases & camps"
         case .equipment: return "Equipment"
         case .facility: return "Facility membership"
+        case .other: return "Other"
         }
+    }
+
+    /// What a tournament trip usually costs, in the order the trip screen lists them.
+    public static let tripCategories: [ExpenseCategory] = [.tournamentFees, .travel, .lodging, .food, .other]
+
+    /// A category added by a newer version reads as `other` rather than failing to load.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ExpenseCategory(rawValue: raw) ?? .other
     }
 }
 
@@ -37,9 +54,11 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
     /// The season it counts toward, as the year it starts. Usually the season of `date`, but a fee paid in July can
     /// belong to the season starting in August.
     public var season: Int
+    /// The tournament trip it was for, if any.
+    public var tripID: UUID?
 
     public init(id: UUID = UUID(), date: Date, title: String, category: ExpenseCategory, amount: Double, note: String = "",
-                programID: String? = nil, season: Int? = nil) {
+                programID: String? = nil, season: Int? = nil, tripID: UUID? = nil) {
         self.id = id
         self.date = date
         self.title = title
@@ -48,13 +67,15 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
         self.note = note
         self.programID = programID
         self.season = season ?? AthleteProfile.seasonStart(for: date)
+        self.tripID = tripID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, date, title, category, amount, note, programID, season
+        case id, date, title, category, amount, note, programID, season, tripID
     }
 
-    /// Expenses saved before seasons and programs have neither; they count toward the season of their date.
+    /// Expenses saved before seasons and programs have neither; they count toward the season of their date. Those saved
+    /// before trips have no `tripID`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -65,6 +86,7 @@ public struct Expense: Identifiable, Codable, Hashable, Sendable {
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
         programID = try c.decodeIfPresent(String.self, forKey: .programID)
         season = try c.decodeIfPresent(Int.self, forKey: .season) ?? AthleteProfile.seasonStart(for: date)
+        tripID = try c.decodeIfPresent(UUID.self, forKey: .tripID)
     }
 }
 
@@ -194,6 +216,7 @@ extension AppData {
         seasons.formUnion(expenses.map(\.season))
         seasons.formUnion(seasonBudgets.map(\.season))
         seasons.formUnion(programBudgets.map(\.season))
+        seasons.formUnion(trips.map(\.season))
         for program in programs {
             if let first = program.firstSeason { seasons.insert(first) }
             if let last = program.lastSeason { seasons.insert(last) }

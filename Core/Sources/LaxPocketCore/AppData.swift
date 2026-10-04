@@ -95,6 +95,8 @@ public struct AppData: Codable, Equatable, Sendable {
     public var seasonBudgets: [SeasonBudget]
     /// What's set aside for each program, per season.
     public var programBudgets: [ProgramBudget]
+    /// Tournament, showcase and camp trips; their expenses say which trip they're for.
+    public var trips: [Trip]
     public var docs: [MentalDoc]
     /// Height and weight checks. They belong to the athlete, so a blank season keeps them.
     public var bodyMeasurements: [BodyMeasurement]
@@ -105,7 +107,7 @@ public struct AppData: Codable, Equatable, Sendable {
 
     public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [],
                 wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID,
-                seasonBudgets: [SeasonBudget] = [], programBudgets: [ProgramBudget] = []) {
+                seasonBudgets: [SeasonBudget] = [], programBudgets: [ProgramBudget] = [], trips: [Trip] = []) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -116,6 +118,7 @@ public struct AppData: Codable, Equatable, Sendable {
         self.expenses = expenses
         self.seasonBudgets = seasonBudgets
         self.programBudgets = programBudgets
+        self.trips = trips
         self.docs = docs
         self.bodyMeasurements = bodyMeasurements
         self.wallballDrills = wallballDrills
@@ -126,8 +129,8 @@ public struct AppData: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudgets, programBudgets, docs, bodyMeasurements,
-             wallballDrills, wallballSessions, themeID
+        case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudgets, programBudgets, trips, docs,
+             bodyMeasurements, wallballDrills, wallballSessions, themeID
     }
 
     /// Files saved before budgets per season had one `seasonBudget` for the season the profile was set to.
@@ -147,6 +150,7 @@ public struct AppData: Codable, Equatable, Sendable {
         events = try c.decodeIfPresent([SeasonEvent].self, forKey: .events) ?? []
         expenses = try c.decodeIfPresent([Expense].self, forKey: .expenses) ?? []
         programBudgets = try c.decodeIfPresent([ProgramBudget].self, forKey: .programBudgets) ?? []
+        trips = try c.decodeIfPresent([Trip].self, forKey: .trips) ?? []
         if let budgets = try c.decodeIfPresent([SeasonBudget].self, forKey: .seasonBudgets) {
             seasonBudgets = budgets
         } else {
@@ -208,11 +212,13 @@ public struct AppData: Codable, Equatable, Sendable {
         return counts
     }
 
-    /// A clean season for the same athlete: keeps the profile, programs, budgets and expenses (each belongs to a season),
-    /// height and weight history, wall ball drills and theme, drops the season's logged data.
+    /// A clean season for the same athlete: keeps the profile, programs, budgets, trips and expenses (each belongs to a
+    /// season), height and weight history, wall ball drills and theme, drops the season's logged data. Trips lose their
+    /// link to the events that go.
     public func blankSeason() -> AppData {
         AppData(id: id, profile: profile, programs: programs, expenses: expenses, bodyMeasurements: bodyMeasurements,
-                wallballDrills: wallballDrills, themeID: themeID, seasonBudgets: seasonBudgets, programBudgets: programBudgets)
+                wallballDrills: wallballDrills, themeID: themeID, seasonBudgets: seasonBudgets, programBudgets: programBudgets,
+                trips: trips.map { var trip = $0; trip.eventID = nil; return trip })
     }
 
     public static let encoder: JSONEncoder = {

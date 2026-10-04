@@ -94,7 +94,10 @@ struct ProgramBudgetView: View {
                 }
             }
         }
-        .sheet(item: $editing) { target in ExpenseEditorView(expense: target.expense, programID: target.programID, season: target.season) }
+        .sheet(item: $editing) { target in
+            ExpenseEditorView(expense: target.expense, programID: target.programID, season: target.season, tripID: target.tripID,
+                              category: target.category)
+        }
         .sheet(isPresented: $showBudgetEditor) { BudgetEditorView(season: season, data: store.data) }
     }
 
