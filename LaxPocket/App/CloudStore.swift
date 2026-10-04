@@ -159,7 +159,8 @@ final class CloudStore {
             let cloud = CloudSync(client: client)
             var firstError: Error?
             // One athlete failing (say, a view-only one with local edits) doesn't hold up the rest.
-            for summary in appStore.profiles {
+            // The demo athlete (debug builds) stays on this iPhone.
+            for summary in appStore.profiles where summary.id != DemoSeason.profileID {
                 do {
                     try await sync(summary.id, using: cloud)
                 } catch {

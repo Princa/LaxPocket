@@ -8,6 +8,10 @@ struct LaxPocketApp: App {
 
     init() {
         let store = AppStore()
+        #if DEBUG
+        // `-demo` (e.g. `xcrun simctl launch booted com.princa.laxpocket -demo`) loads the made-up demo athlete.
+        if ProcessInfo.processInfo.arguments.contains("-demo") { store.loadDemoAthlete() }
+        #endif
         _store = State(initialValue: store)
         _cloud = State(initialValue: CloudStore(appStore: store))
     }

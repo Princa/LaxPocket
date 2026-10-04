@@ -96,6 +96,20 @@ final class AppStore {
         }
     }
 
+    #if DEBUG
+    /// Adds the made-up demo athlete (or rebuilds it around today) and switches to it. Debug builds only; the demo
+    /// stays on this device and isn't a local change, so cloud sync never uploads it.
+    func loadDemoAthlete() {
+        let demo = DemoSeason.make(now: now)
+        data = demo
+        index.upsert(demo.summary)
+        index.activeProfileID = demo.id
+        selectedTab = .home
+        saveProfile()
+        saveIndex()
+    }
+    #endif
+
     /// Removes a profile and its data from this device. Switches to another profile if it was showing.
     func deleteProfile(_ id: UUID) {
         do {

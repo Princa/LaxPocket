@@ -37,6 +37,8 @@ open LaxPocket.xcodeproj
 
 Pick your iPhone or a simulator and press **Run**. On first launch the app asks you to create an athlete profile, then walks you through adding the programs they train with.
 
+To demo the app, debug builds can load **Maya**, a made-up athlete with a full season built around today: tap **Load the demo athlete** on the welcome screen or in **Theme & settings → Demo data**, or launch with `-demo` (`xcrun simctl launch booted com.princa.laxpocket -demo`). Loading her again rebuilds her season; she stays on the device and is never synced. Release builds don't include this.
+
 `scripts/setup-mac.sh` is a one-time step. It installs [XcodeGen](https://github.com/yonaskolb/XcodeGen) if needed, generates the Xcode project from `project.yml`, saves your signing team in `Config/Local.xcconfig` (not committed; it reads the team from your Apple Development certificate, or pass it: `scripts/setup-mac.sh ABCDE12345`), and turns on git hooks that regenerate the project after every pull, checkout or rebase. After that:
 
 - **Pulling changes:** `git pull`, then build. The project updates itself and keeps your signing team; if Xcode asks, choose **Revert** to reload it.
@@ -85,7 +87,7 @@ CI (GitHub Actions) runs the Core tests on Linux and macOS, builds the app for t
 
 - Each athlete's data is stored in its own JSON file in the app's Application Support folder (`LaxPocket/profiles/<id>.json`, with `profiles.json` listing them), with iOS file protection turned on. There are no analytics.
 - Cloud sync is opt-in and goes only to your own Supabase project. Row-level security limits each account to the athletes it owns or that were shared with it. The sign-in session is kept in the iOS Keychain.
-- The repository holds **no personal data** and the app ships with no sample data. Test fixtures use made-up numbers. The athlete's real results are entered in the app and stay on the phone.
+- The repository holds **no personal data** and the app ships with no sample data (the demo athlete is debug-only and made up). Test fixtures use made-up numbers. The athlete's real results are entered in the app and stay on the phone.
 - Upgrading from 0.1 moves the old `season.json` into a profile. The built-in sample season is dropped rather than imported.
 - Mental-game documents stay in Google Drive. The app only stores the link, title and folder.
 
