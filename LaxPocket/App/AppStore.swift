@@ -217,10 +217,13 @@ final class AppStore {
     }
 
     /// Adds the event, or replaces the one with the same ID.
+    /// A trip to the event moves with it (see `AppData.moveTrips`).
     func saveEvent(_ event: SeasonEvent) {
         update { data in
             if let index = data.events.firstIndex(where: { $0.id == event.id }) {
+                let old = data.events[index]
                 data.events[index] = event
+                data.moveTrips(from: old, to: event)
             } else {
                 data.events.append(event)
             }

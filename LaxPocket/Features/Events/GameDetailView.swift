@@ -1,12 +1,15 @@
 import SwiftUI
 import LaxPocketCore
 
+/// One event: the score and stat line once there is one, the trip and what it cost, video, pre-game focus, the
+/// reflection and the prep checklist.
 struct GameDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.appTheme) private var theme
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @State private var showEdit = false
+    @State private var planningTrip = false
     let eventID: UUID
 
     var body: some View {
@@ -14,16 +17,21 @@ struct GameDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Eyebrow(text: "\(event.team) · \(event.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                        Eyebrow(text: eyebrow(event))
                         Text(event.opponent.map { "vs \($0)" } ?? event.title)
                             .font(.display(40)).textCase(.uppercase).foregroundStyle(AppTheme.ink)
                         if !event.location.isEmpty {
-                            Label("\(event.location) · \(Formatters.time(event.date))", systemImage: "mappin")
+                            Label(event.dateIsTentative ? event.location : "\(event.location) · \(Formatters.time(event.date))", systemImage: "mappin")
                                 .font(.system(size: 14)).foregroundStyle(AppTheme.muted)
                         }
                     }
 
-                    scoreCard(event)
+                    if event.hasResult { scoreCard(event) }
+
+                    if event.kind != .game || store.data.trip(forEvent: event.id) != nil {
+                        SectionHeader(title: "Trip & costs").padding(.top, 8)
+                        tripCard(event)
+                    }
 
                     if !event.videos.isEmpty {
                         SectionHeader(title: "Video").padding(.top, 8)
@@ -57,6 +65,15 @@ struct GameDetailView: View {
                         SectionHeader(title: "Post-game reflection").padding(.top, 8)
                         reflectionCard(reflection)
                     }
+
+                    if !event.checklist.isEmpty {
+                        SectionHeader(title: "Prep checklist") {
+                            Text("\(event.checklistProgress.done) of \(event.checklistProgress.total) done")
+                                .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
+                        .padding(.top, 8)
+                        checklistCard(event)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
@@ -67,8 +84,112 @@ struct GameDetailView: View {
                 ToolbarItem(placement: .primaryAction) { Button("Edit") { showEdit = true } }
             }
             .sheet(isPresented: $showEdit) { EventEditorView(event: event, onDelete: { dismiss() }) }
+            .sheet(isPresented: $planningTrip) { TripEditorView(event: event) }
         } else {
             ContentUnavailableView("Event not found", systemImage: "calendar.badge.exclamationmark")
+        }
+    }
+
+    /// "Club 2031 · Sat, Oct 17" for a game, "Tournament · Club 2031 · Oct 16 – 18" otherwise.
+    private func eyebrow(_ event: SeasonEvent) -> String {
+        let parts = event.kind == .game ? [event.team, dates(event)] : [event.kind.title, event.team, dates(event)]
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// "Sat, Oct 17", "Oct 16 – 18", or "Oct · dates TBC".
+    private func dates(_ event: SeasonEvent) -> String {
+        if event.dateIsTentative { return "\(event.date.formatted(.dateTime.month(.abbreviated))) · dates TBC" }
+        guard let end = event.endDate, !Calendar.laxWeek.isDate(end, inSameDayAs: event.date) else {
+            return event.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        }
+        return TripDates.range(Trip(name: "", departureDate: event.date, returnDate: end))
+    }
+
+    /// The trip to this event and what it cost, with a way in; or a way to plan one.
+    @ViewBuilder
+    private func tripCard(_ event: SeasonEvent) -> some View {
+        if let trip = store.data.trip(forEvent: event.id) {
+            let summary = TripMath.summary(trip, in: store.data)
+            Card(padding: 0) {
+                NavigationLink { TripView(tripID: trip.id) } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(trip.name.isEmpty ? "Trip" : trip.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                                Text([trip.destination, TripDates.range(trip)].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(store.money(summary.spent)).font(.display(24))
+                                    .foregroundStyle(summary.isOverBudget ? theme.accentText : theme.primary)
+                                if trip.budget > 0 {
+                                    Text("of \(store.money(trip.budget))").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                                }
+                            }
+                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.chevron)
+                        }
+                        HStack(spacing: 6) {
+                            Pill(text: summary.days == 1 ? "1 day" : "\(summary.days) days", background: AppTheme.background, foreground: AppTheme.ink2)
+                            if trip.isInUS {
+                                Pill(text: "US", background: theme.accentTint, foreground: theme.accentText, systemImage: "airplane")
+                            }
+                            if trip.hasHotel {
+                                Pill(text: trip.hotelName.isEmpty ? "Hotel" : trip.hotelName, background: AppTheme.background, foreground: AppTheme.ink2,
+                                     systemImage: "bed.double.fill")
+                                    .lineLimit(1)
+                            }
+                        }
+                        if !summary.byCategory.isEmpty {
+                            Text(summary.byCategory.prefix(4).map { "\($0.category.tripTitle) \(store.money($0.amount))" }.joined(separator: " · "))
+                                .font(.system(size: 12)).foregroundStyle(AppTheme.caption).lineLimit(2)
+                        }
+                    }
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Track the entry fee, travel, hotel and food for this \(event.kind.title.lowercased()) as one trip in the Budget.")
+                        .font(.system(size: 14)).foregroundStyle(AppTheme.ink2)
+                    Button { planningTrip = true } label: { Label("Plan the trip", systemImage: "suitcase.fill") }
+                        .buttonStyle(.borderedProminent)
+                        .tint(theme.primary)
+                }
+            }
+        }
+    }
+
+    private func checklistCard(_ event: SeasonEvent) -> some View {
+        Card(padding: 0) {
+            ForEach(Array(event.checklist.enumerated()), id: \.element.id) { index, item in
+                Button { toggle(item.id, in: event) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 20)).foregroundStyle(item.done ? theme.primary : AppTheme.chevron)
+                        Text(item.title).font(.system(size: 15)).foregroundStyle(item.done ? AppTheme.caption : AppTheme.ink)
+                            .strikethrough(item.done)
+                        Spacer()
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(item.done ? .isSelected : [])
+                if index < event.checklist.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+            }
+        }
+    }
+
+    private func toggle(_ itemID: UUID, in event: SeasonEvent) {
+        var updated = event
+        if let index = updated.checklist.firstIndex(where: { $0.id == itemID }) {
+            updated.checklist[index].done.toggle()
+            store.saveEvent(updated)
         }
     }
 

@@ -27,33 +27,43 @@ struct TripEditorView: View {
     @State private var note: String
     @State private var confirmDelete = false
 
-    /// A new trip can start in a season.
-    init(trip: Trip? = nil, season: Int? = nil) {
+    /// The team of the event a new trip started from, to pick its program.
+    private let startingTeam: String?
+
+    /// A new trip can start in a season, or from an event (its name, dates and place).
+    init(trip: Trip? = nil, season: Int? = nil, event: SeasonEvent? = nil) {
         self.trip = trip
+        startingTeam = trip == nil ? event?.team : nil
+        // Editing shows the trip; a new trip from an event starts as a copy of it.
+        let template = trip ?? event.map { Trip(event: $0) }
         let today = Calendar.laxWeek.startOfDay(for: Date())
-        let departure = trip?.departureDate ?? today
-        let back = trip?.returnDate ?? departure
-        _name = State(initialValue: trip?.name ?? "")
-        _eventID = State(initialValue: trip?.eventID)
-        _programID = State(initialValue: trip?.programID)
-        _destination = State(initialValue: trip?.destination ?? "")
-        _country = State(initialValue: trip?.country ?? .unitedStates)
+        let departure = template?.departureDate ?? today
+        let back = template?.returnDate ?? departure
+        _name = State(initialValue: template?.name ?? "")
+        _eventID = State(initialValue: template?.eventID)
+        _programID = State(initialValue: template?.programID)
+        _destination = State(initialValue: template?.destination ?? "")
+        _country = State(initialValue: template?.country ?? .unitedStates)
         _departureDate = State(initialValue: departure)
         _returnDate = State(initialValue: back)
-        _season = State(initialValue: trip?.season ?? season ?? AthleteProfile.seasonStart(for: departure))
-        _budgetText = State(initialValue: trip.map { $0.budget > 0 ? AmountText.string($0.budget) : "" } ?? "")
-        _travelMode = State(initialValue: trip?.travelMode ?? .drive)
-        _travelDetails = State(initialValue: trip?.travelDetails ?? "")
-        _hotelName = State(initialValue: trip?.hotelName ?? "")
-        _hotelAddress = State(initialValue: trip?.hotelAddress ?? "")
-        _hotelConfirmation = State(initialValue: trip?.hotelConfirmation ?? "")
-        _hotelHasOwnDates = State(initialValue: trip?.hotelCheckIn != nil || trip?.hotelCheckOut != nil)
-        _hotelCheckIn = State(initialValue: trip?.hotelCheckIn ?? departure)
-        _hotelCheckOut = State(initialValue: trip?.hotelCheckOut ?? back)
-        _note = State(initialValue: trip?.note ?? "")
+        _season = State(initialValue: template?.season ?? season ?? AthleteProfile.seasonStart(for: departure))
+        _budgetText = State(initialValue: template.map { $0.budget > 0 ? AmountText.string($0.budget) : "" } ?? "")
+        _travelMode = State(initialValue: template?.travelMode ?? .drive)
+        _travelDetails = State(initialValue: template?.travelDetails ?? "")
+        _hotelName = State(initialValue: template?.hotelName ?? "")
+        _hotelAddress = State(initialValue: template?.hotelAddress ?? "")
+        _hotelConfirmation = State(initialValue: template?.hotelConfirmation ?? "")
+        _hotelHasOwnDates = State(initialValue: template?.hotelCheckIn != nil || template?.hotelCheckOut != nil)
+        _hotelCheckIn = State(initialValue: template?.hotelCheckIn ?? departure)
+        _hotelCheckOut = State(initialValue: template?.hotelCheckOut ?? back)
+        _note = State(initialValue: template?.note ?? "")
     }
 
     private var isNew: Bool { trip == nil }
+    /// Another trip already going to the picked event.
+    private var otherTripToEvent: Trip? {
+        eventID.flatMap(store.data.trip(forEvent:)).flatMap { $0.id == trip?.id ? nil : $0 }
+    }
     /// Blank means no budget; anything typed has to be a number.
     private var budget: Double? {
         let text = budgetText.trimmingCharacters(in: .whitespaces)
@@ -64,9 +74,15 @@ struct TripEditorView: View {
         budget != nil && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Tournaments, showcases and camps, most recent first, plus the one already picked.
+    /// Tournaments, showcases and camps without a trip yet, most recent first, plus the one already picked. An event
+    /// has one trip.
     private var eventChoices: [SeasonEvent] {
-        store.data.events.filter { $0.kind != .game || $0.id == eventID }.sorted { $0.date > $1.date }
+        store.data.events.filter { event in
+            if event.id == eventID { return true }
+            guard event.kind != .game else { return false }
+            return store.data.trip(forEvent: event.id).map { $0.id == trip?.id } ?? true
+        }
+        .sorted { $0.date > $1.date }
     }
 
     private var programChoices: [Program] {
@@ -113,7 +129,13 @@ struct TripEditorView: View {
                         }
                     }
                 } footer: {
-                    if !eventChoices.isEmpty { Text("Picking an event fills in its dates and place.") }
+                    if otherTripToEvent != nil {
+                        Text("That event already has a trip. Its costs are best kept on that one.")
+                    } else if eventID != nil {
+                        Text("Linked to the event: the trip shows on its page, and moves when the event's dates change.")
+                    } else if !eventChoices.isEmpty {
+                        Text("Picking an event fills in its dates and place, and links the trip to it.")
+                    }
                 }
 
                 Section {
@@ -182,6 +204,12 @@ struct TripEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save).fontWeight(.bold).disabled(!canSave)
+                }
+            }
+            .onAppear {
+                // A trip started from an event goes with the event's team, when that's a program.
+                if isNew, programID == nil, let team = startingTeam, let match = store.data.programs.first(where: { $0.name == team }) {
+                    programID = match.id
                 }
             }
             .onChange(of: eventID) { _, new in
