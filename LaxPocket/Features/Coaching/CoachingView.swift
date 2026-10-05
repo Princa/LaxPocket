@@ -16,6 +16,7 @@ struct CoachingView: View {
     @State private var showNew = false
     @State private var showSettings = false
     @State private var now = Date()
+    @State private var newTaskRoster: CoachRoster?
 
     var body: some View {
         ScrollView {
@@ -67,14 +68,16 @@ struct CoachingView: View {
             }
             if let onShowFamily {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onShowFamily) { Label("My family", systemImage: "chevron.left") }
-                        .labelStyle(.titleAndIcon)
+                    Button("My family", action: onShowFamily)
                 }
             }
         }
         .task { await load() }
         .refreshable { await load() }
         .sheet(isPresented: $showNew, onDismiss: { Task { await load() } }) { NewRosterView() }
+        .sheet(item: $newTaskRoster) { roster in
+            AssignmentEditorView(roster: roster, onSaved: { Task { await load() } })
+        }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
                 CloudSyncView()
@@ -115,7 +118,7 @@ struct CoachingView: View {
         } else {
             Card(padding: 0) {
                 ForEach(Array(roster.athletes.enumerated()), id: \.element.id) { index, athlete in
-                    NavigationLink { CoachAthleteView(athlete: athlete, now: now) } label: {
+                    NavigationLink { CoachAthleteView(athlete: athlete, now: now, onChange: { Task { await load() } }) } label: {
                         CoachAthleteRow(athlete: athlete, week: athlete.week(now: now))
                     }
                     .buttonStyle(.plain)
@@ -124,6 +127,48 @@ struct CoachingView: View {
                 }
             }
         }
+
+        HStack {
+            Text("Tasks").font(.system(size: 15, weight: .semibold))
+            Spacer()
+            Button { newTaskRoster = roster } label: { Label("New task", systemImage: "plus") }
+                .font(.system(size: 14, weight: .semibold))
+        }
+        .padding(.top, 4)
+        if roster.assignments.isEmpty {
+            Text("Give the roster or one athlete wall ball reps, training minutes or something to tick off, every day, every week or by a date.")
+                .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+        } else {
+            Card(padding: 0) {
+                ForEach(Array(roster.assignments.enumerated()), id: \.element.id) { index, assignment in
+                    NavigationLink {
+                        AssignmentDetailView(roster: roster, assignment: assignment, now: now, onChange: { Task { await load() } })
+                    } label: {
+                        taskRow(assignment, in: roster)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 14)
+                    if index < roster.assignments.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                }
+            }
+        }
+    }
+
+    private func taskRow(_ assignment: Assignment, in roster: CoachRoster) -> some View {
+        let counts = roster.completion(of: assignment, now: now)
+        let forWhom = assignment.profileID.flatMap { id in roster.athletes.first { $0.id == id }?.data.profile.firstName } ?? "Everyone"
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(assignment.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                Text("\(forWhom) · \(assignment.summary())").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+            }
+            Spacer()
+            Text(counts.map { "\($0.done) of \($0.of) done" } ?? "Not running")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(counts.map { $0.done == $0.of && $0.of > 0 } == true ? AppTheme.ink : AppTheme.muted)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.chevron)
+        }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 }
 
@@ -146,7 +191,7 @@ struct CoachAthleteRow: View {
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.chevron)
             }
             StackedHoursBar(hours: week.hours, goal: week.goalHours, height: 8)
-            HStack(spacing: 6) {
+            FlowLayout(spacing: 6) {
                 if let ratio = week.loadRatio, let zone = week.zone {
                     Pill(text: "Load \(String(format: "%.2f", ratio)) · \(zone.title)",
                          background: zone == .high ? theme.accentTint : AppTheme.background,
@@ -174,13 +219,22 @@ struct CoachAthleteRow: View {
 /// What a coach sees of one athlete: the week, recent training and wall ball, events, and the mental game for a
 /// mental coach. Read only.
 struct CoachAthleteView: View {
+    @Environment(CloudStore.self) private var cloud
     @Environment(\.appTheme) private var theme
     @Environment(\.openURL) private var openURL
     let athlete: CoachAthlete
     let now: Date
+    var onChange: () -> Void = {}
+    /// Notes written here show straight away, before Coaching reloads.
+    @State private var notes: [CoachNote]?
+    @State private var notingEvent: SeasonEvent?
 
     var body: some View {
-        let data = athlete.data
+        let data: AppData = {
+            var data = athlete.data
+            if let notes { data.coachNotes = notes }
+            return data
+        }()
         let week = athlete.week(now: now)
         let recent = data.sessions.filter { $0.date <= now && $0.date >= now.addingTimeInterval(-14 * 86_400) }.sorted { $0.date > $1.date }
         let upcoming = Array(Season.upcoming(data.events, from: now).prefix(3))
@@ -215,6 +269,16 @@ struct CoachAthleteView: View {
                     }
                 }
 
+                let tasks = data.assignmentStatuses(now: now)
+                if !tasks.isEmpty {
+                    Card(padding: 0) {
+                        ForEach(Array(tasks.enumerated()), id: \.element.id) { index, status in
+                            AssignmentStatusRow(status: status, showsCoach: false).padding(.horizontal, 14)
+                            if index < tasks.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                        }
+                    }
+                }
+
                 Card {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -238,6 +302,9 @@ struct CoachAthleteView: View {
                     Card(padding: 0) {
                         ForEach(Array(recent.enumerated()), id: \.element.id) { index, session in
                             VStack(alignment: .leading, spacing: 0) {
+                                Text(session.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.caption)
+                                    .padding(.top, 10)
                                 SessionRow(session: session, programName: data.program(id: session.programID)?.name ?? session.category.title)
                                 if session.category == .mental && !session.notes.isEmpty {
                                     Text(session.notes).font(.system(size: 13)).foregroundStyle(AppTheme.ink2).padding(.bottom, 12)
@@ -258,7 +325,7 @@ struct CoachAthleteView: View {
 
                 if !results.isEmpty {
                     SectionHeader(title: "Recent games").padding(.top, 6)
-                    ForEach(results) { event in resultCard(event) }
+                    ForEach(results) { event in resultCard(event, notes: data.coachNotes(for: event.id)) }
                 }
 
                 if data.canRead(.mental) {
@@ -270,9 +337,26 @@ struct CoachAthleteView: View {
         }
         .background(AppTheme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $notingEvent) { event in
+            CoachNoteEditor(athleteName: athlete.data.profile.firstName, event: event, athleteID: athlete.id,
+                            note: myNote(on: event.id, in: data)?.note ?? "") { text in
+                var list = (notes ?? athlete.data.coachNotes).filter { !($0.eventID == event.id && $0.coachID == myID) }
+                if !text.isEmpty, let me = myID {
+                    list.append(CoachNote(eventID: event.id, coachID: me, coachName: cloud.account?.displayName ?? "", note: text, updatedAt: Date()))
+                }
+                notes = list
+                onChange()
+            }
+        }
     }
 
-    private func resultCard(_ event: SeasonEvent) -> some View {
+    private var myID: UUID? { cloud.session?.userID }
+
+    private func myNote(on eventID: UUID, in data: AppData) -> CoachNote? {
+        data.coachNotes.first { $0.eventID == eventID && $0.coachID == myID }
+    }
+
+    private func resultCard(_ event: SeasonEvent, notes: [CoachNote]) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -293,6 +377,13 @@ struct CoachAthleteView: View {
                         Text("Coach: \(reflection.coachFeedback)").font(.system(size: 13)).foregroundStyle(AppTheme.muted)
                     }
                 }
+                ForEach(notes, id: \.coachID) { note in
+                    Text("\(note.coachID == myID ? "You" : (note.coachName.isEmpty ? "Coach" : note.coachName)): “\(note.note)”")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(theme.primary)
+                }
+                Button(notes.contains { $0.coachID == myID } ? "Edit your note" : "Write a note") { notingEvent = event }
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.top, 2)
             }
         }
     }

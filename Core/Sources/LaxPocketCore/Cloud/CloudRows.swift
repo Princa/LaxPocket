@@ -665,11 +665,18 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var lockedDocs: [LockedMentalDocRow]
     /// What this account can do with the athlete. Nil before the athlete is in the cloud.
     public var access: ProfileAccess?
+    /// Coaches' tasks for the athlete. Read only, like `lockedDocs`.
+    public var assignments: [AthleteAssignmentRow]
+    /// Tasks ticked off by hand. Merged like any other table.
+    public var assignmentCompletions: [CompletionRow]
+    /// Coaches' notes on games. Read only.
+    public var coachNotes: [AthleteCoachNoteRow]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
                 events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
                 wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = [], seasonBudgets: [SeasonBudgetRow] = [],
-                programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = [], lockedDocs: [LockedMentalDocRow] = [], access: ProfileAccess? = nil) {
+                programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = [], lockedDocs: [LockedMentalDocRow] = [], access: ProfileAccess? = nil,
+                assignments: [AthleteAssignmentRow] = [], assignmentCompletions: [CompletionRow] = [], coachNotes: [AthleteCoachNoteRow] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -685,11 +692,14 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.trips = trips
         self.lockedDocs = lockedDocs
         self.access = access
+        self.assignments = assignments
+        self.assignmentCompletions = assignmentCompletions
+        self.coachNotes = coachNotes
     }
 
     private enum CodingKeys: String, CodingKey {
         case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions,
-             seasonBudgets, programBudgets, trips, lockedDocs, access
+             seasonBudgets, programBudgets, trips, lockedDocs, access, assignments, assignmentCompletions, coachNotes
     }
 
     /// Sync records saved before height and weight tracking have no `bodyMeasurements`, those saved before
@@ -713,6 +723,9 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         trips = try c.decodeIfPresent([TripRow].self, forKey: .trips) ?? []
         lockedDocs = try c.decodeIfPresent([LockedMentalDocRow].self, forKey: .lockedDocs) ?? []
         access = try c.decodeIfPresent(ProfileAccess.self, forKey: .access)
+        assignments = try c.decodeIfPresent([AthleteAssignmentRow].self, forKey: .assignments) ?? []
+        assignmentCompletions = try c.decodeIfPresent([CompletionRow].self, forKey: .assignmentCompletions) ?? []
+        coachNotes = try c.decodeIfPresent([AthleteCoachNoteRow].self, forKey: .coachNotes) ?? []
     }
 }
 
@@ -871,6 +884,12 @@ extension ProfileSnapshot {
         }
         lockedDocs = data.lockedDocs.map { LockedMentalDocRow(id: $0.id, profileID: pid, folder: $0.folder, docUpdatedAt: Timestamp($0.updatedAt)) }
         access = data.access
+        assignments = data.assignments.map { AthleteAssignmentRow($0, athleteID: pid) }
+        assignmentCompletions = data.assignmentCompletions.map { CompletionRow(assignmentID: $0.assignmentID, profileID: pid, periodStart: $0.periodStart) }
+        coachNotes = data.coachNotes.map {
+            AthleteCoachNoteRow(eventID: $0.eventID, profileID: pid, coachID: $0.coachID, coachName: $0.coachName, note: $0.note,
+                                updatedAt: Timestamp($0.updatedAt))
+        }
         bodyMeasurements = data.bodyMeasurements.compactMap { BodyMeasurementRow($0, profileID: pid) }
         wallballDrills = data.wallballDrills.enumerated().map { WallballDrillRow($1, profileID: pid, sortOrder: $0) }
         wallballSessions = data.wallballSessions.map { WallballBundle($0, profileID: pid) }
@@ -938,7 +957,11 @@ extension ProfileSnapshot {
             lockedDocs: lockedDocs.sorted { $0.docUpdatedAt > $1.docUpdatedAt }.map {
                 LockedMentalDoc(id: $0.id, folder: $0.folder, updatedAt: $0.docUpdatedAt.date)
             },
-            access: access
+            access: access,
+            assignments: assignments.map(\.assignment).sorted { ($0.startsOn, $0.title) < ($1.startsOn, $1.title) },
+            assignmentCompletions: assignmentCompletions.sorted { ($0.periodStart, $0.assignmentID.uuidString) < ($1.periodStart, $1.assignmentID.uuidString) }
+                .map { AssignmentCompletion(assignmentID: $0.assignmentID, periodStart: $0.periodStart) },
+            coachNotes: coachNotes.map(\.coachNote)
         )
     }
 }
@@ -983,6 +1006,8 @@ extension ProfileSnapshot {
             && Set(wallballDrills) == Set(other.wallballDrills) && Set(wallballSessions) == Set(other.wallballSessions)
             && Set(seasonBudgets) == Set(other.seasonBudgets) && Set(programBudgets) == Set(other.programBudgets)
             && Set(trips) == Set(other.trips) && Set(lockedDocs) == Set(other.lockedDocs) && access == other.access
+            && Set(assignments) == Set(other.assignments) && Set(assignmentCompletions) == Set(other.assignmentCompletions)
+            && Set(coachNotes) == Set(other.coachNotes)
     }
 }
 
@@ -1095,5 +1120,184 @@ public enum CodeInfo: Equatable, Sendable, Decodable {
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown code type \(other)")
         }
+    }
+}
+
+// MARK: - Tasks and game notes
+
+/// A coach's task (`assignments`), as the coach writes it.
+public struct AssignmentRow: CloudRow {
+    public static let table = "assignments"
+    public static let columns = ["id", "roster_id", "profile_id", "kind", "title", "notes", "schedule", "starts_on", "due_on", "ends_on",
+                                 "target_reps", "target_minutes", "category"]
+    public static let conflictColumns = ["id"]
+
+    public var id: UUID
+    public var rosterID: UUID
+    public var profileID: UUID?
+    public var kind: AssignmentKind
+    public var title: String
+    public var notes: String
+    public var schedule: AssignmentSchedule
+    public var startsOn: DayKey
+    public var dueOn: DayKey?
+    public var endsOn: DayKey?
+    public var targetReps: Int?
+    public var targetMinutes: Int?
+    public var category: SessionCategory?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, notes, schedule, category
+        case rosterID = "roster_id", profileID = "profile_id", startsOn = "starts_on", dueOn = "due_on", endsOn = "ends_on",
+             targetReps = "target_reps", targetMinutes = "target_minutes"
+    }
+
+    /// Kept to what the database accepts: a title, a due date only for a one-off task, a target only for its kind.
+    public init(_ a: Assignment) {
+        id = a.id
+        rosterID = a.rosterID
+        profileID = a.profileID
+        kind = a.kind
+        let trimmed = a.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = String((trimmed.isEmpty ? a.kind.title : trimmed).prefix(120))
+        notes = String(a.notes.prefix(2000))
+        schedule = a.schedule
+        startsOn = a.startsOn
+        dueOn = a.schedule == .once ? max(a.dueOn ?? a.startsOn, a.startsOn) : nil
+        endsOn = a.schedule == .once ? nil : a.endsOn.map { max($0, a.startsOn) }
+        targetReps = a.kind == .wallball ? min(max(a.targetReps ?? 100, 1), 10_000) : nil
+        targetMinutes = a.kind == .training ? min(max(a.targetMinutes ?? 60, 1), 10_080) : nil
+        category = a.kind == .training ? a.category : nil
+    }
+
+    func assignment(rosterName: String = "", coachName: String = "") -> Assignment {
+        Assignment(id: id, rosterID: rosterID, profileID: profileID, rosterName: rosterName, coachName: coachName, kind: kind, title: title,
+                   notes: notes, schedule: schedule, startsOn: startsOn, dueOn: dueOn, endsOn: endsOn, targetReps: targetReps,
+                   targetMinutes: targetMinutes, category: category)
+    }
+}
+
+/// A task as one of its athletes sees it (`athlete_assignments`), with the roster and coach names. Read only.
+public struct AthleteAssignmentRow: Codable, Hashable, Sendable {
+    public static let table = "athlete_assignments"
+
+    public var id: UUID
+    public var athleteID: UUID
+    public var rosterID: UUID
+    public var rosterName: String
+    public var coachName: String
+    public var kind: AssignmentKind
+    public var title: String
+    public var notes: String
+    public var schedule: AssignmentSchedule
+    public var startsOn: DayKey
+    public var dueOn: DayKey?
+    public var endsOn: DayKey?
+    public var targetReps: Int?
+    public var targetMinutes: Int?
+    public var category: SessionCategory?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, notes, schedule, category
+        case athleteID = "athlete_id", rosterID = "roster_id", rosterName = "roster_name", coachName = "coach_name", startsOn = "starts_on",
+             dueOn = "due_on", endsOn = "ends_on", targetReps = "target_reps", targetMinutes = "target_minutes"
+    }
+
+    var assignment: Assignment {
+        Assignment(id: id, rosterID: rosterID, profileID: athleteID, rosterName: rosterName, coachName: coachName, kind: kind, title: title,
+                   notes: notes, schedule: schedule, startsOn: startsOn, dueOn: dueOn, endsOn: endsOn, targetReps: targetReps,
+                   targetMinutes: targetMinutes, category: category)
+    }
+
+    init(_ a: Assignment, athleteID: UUID) {
+        self.init(id: a.id, athleteID: athleteID, rosterID: a.rosterID, rosterName: a.rosterName, coachName: a.coachName, kind: a.kind,
+                  title: a.title, notes: a.notes, schedule: a.schedule, startsOn: a.startsOn, dueOn: a.dueOn, endsOn: a.endsOn,
+                  targetReps: a.targetReps, targetMinutes: a.targetMinutes, category: a.category)
+    }
+
+    init(id: UUID, athleteID: UUID, rosterID: UUID, rosterName: String, coachName: String, kind: AssignmentKind, title: String, notes: String,
+         schedule: AssignmentSchedule, startsOn: DayKey, dueOn: DayKey?, endsOn: DayKey?, targetReps: Int?, targetMinutes: Int?,
+         category: SessionCategory?) {
+        self.id = id
+        self.athleteID = athleteID
+        self.rosterID = rosterID
+        self.rosterName = rosterName
+        self.coachName = coachName
+        self.kind = kind
+        self.title = title
+        self.notes = notes
+        self.schedule = schedule
+        self.startsOn = startsOn
+        self.dueOn = dueOn
+        self.endsOn = endsOn
+        self.targetReps = targetReps
+        self.targetMinutes = targetMinutes
+        self.category = category
+    }
+}
+
+/// A task ticked off for one period (`assignment_completions`). Families write these; coaches read them.
+public struct CompletionRow: CloudRow {
+    public static let table = "assignment_completions"
+    public static let columns = ["assignment_id", "profile_id", "period_start"]
+    public static let conflictColumns = ["assignment_id", "profile_id", "period_start"]
+
+    public struct Key: Hashable, Sendable {
+        public var assignmentID: UUID
+        public var periodStart: DayKey
+    }
+
+    public var assignmentID: UUID
+    public var profileID: UUID
+    public var periodStart: DayKey
+
+    public var key: Key { Key(assignmentID: assignmentID, periodStart: periodStart) }
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentID = "assignment_id", profileID = "profile_id", periodStart = "period_start"
+    }
+}
+
+/// A coach's note on a game (`event_coach_notes`), as the coach writes it.
+public struct CoachNoteRow: CloudRow {
+    public static let table = "event_coach_notes"
+    public static let columns = ["event_id", "profile_id", "note"]
+    /// coach_id is the signed-in coach, filled in by the database.
+    public static let conflictColumns = ["event_id", "coach_id"]
+
+    public var eventID: UUID
+    public var profileID: UUID
+    public var note: String
+
+    public init(eventID: UUID, profileID: UUID, note: String) {
+        self.eventID = eventID
+        self.profileID = profileID
+        self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case note
+        case eventID = "event_id", profileID = "profile_id"
+    }
+}
+
+/// A coach's note as the family reads it (`athlete_coach_notes`), with the coach's name. Read only.
+public struct AthleteCoachNoteRow: Codable, Hashable, Sendable {
+    public static let table = "athlete_coach_notes"
+
+    public var eventID: UUID
+    public var profileID: UUID
+    public var coachID: UUID
+    public var coachName: String
+    public var note: String
+    public var updatedAt: Timestamp
+
+    enum CodingKeys: String, CodingKey {
+        case note
+        case eventID = "event_id", profileID = "profile_id", coachID = "coach_id", coachName = "coach_name", updatedAt = "updated_at"
+    }
+
+    var coachNote: CoachNote {
+        CoachNote(eventID: eventID, coachID: coachID, coachName: coachName, note: note, updatedAt: updatedAt.date)
     }
 }

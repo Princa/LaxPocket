@@ -82,13 +82,21 @@ struct SettingsView: View {
                 #if DEBUG
                 Section {
                     Button("Load demo athlete") {
-                        store.loadDemoAthlete()
+                        cloud.loadDemo(viewer: nil)
                         dismiss()
+                    }
+                    Menu("View as…") {
+                        ForEach(Relationship.allCases) { viewer in
+                            Button(viewer.demoTitle) {
+                                cloud.loadDemo(viewer: viewer)
+                                dismiss()
+                            }
+                        }
                     }
                 } header: {
                     Text("Demo data")
                 } footer: {
-                    Text("Debug builds only. Adds Maya, a made-up athlete with a full season around today, or rebuilds her if she’s already here. She stays on this iPhone and isn’t synced.")
+                    Text("Debug builds only. Adds Maya, a made-up athlete with a full season around today, or rebuilds her if she’s already here. She stays on this iPhone and isn’t synced. View as shows her the way a parent, her own login or a coach would see her in the cloud; a coach also gets Coaching with a made-up roster. Nothing in the preview is saved to the cloud.")
                 }
                 #endif
             }
@@ -196,3 +204,16 @@ private struct ThemePreview: View {
         .accessibilityLabel("Preview of the \(theme.palette.name) theme")
     }
 }
+
+#if DEBUG
+private extension Relationship {
+    var demoTitle: String {
+        switch self {
+        case .parent: return "A parent (owner)"
+        case .athlete: return "Maya’s own login"
+        case .coach: return "A coach"
+        case .mentalCoach: return "A mental coach"
+        }
+    }
+}
+#endif
