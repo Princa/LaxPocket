@@ -30,6 +30,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var seasonBudgets = TableChanges<SeasonBudgetRow, Int>()
     public var programBudgets = TableChanges<ProgramBudgetRow, ProgramBudgetRow.Key>()
     public var trips = TableChanges<TripRow, UUID>()
+    public var assignmentCompletions = TableChanges<CompletionRow, CompletionRow.Key>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -38,7 +39,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
             && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty && seasonBudgets.isEmpty && programBudgets.isEmpty
-            && trips.isEmpty
+            && trips.isEmpty && assignmentCompletions.isEmpty
     }
 }
 
@@ -79,10 +80,17 @@ public enum ProfileMerge {
             changes.seasonBudgets.upserts = local.seasonBudgets
             changes.programBudgets.upserts = local.programBudgets
             changes.trips.upserts = local.trips
+            changes.assignmentCompletions.upserts = local.assignmentCompletions
             return Outcome(merged: local, changes: changes)
         }
 
         var base = base, local = local
+        // A tick for a task the athlete no longer has (taken off the roster, or the coach removed it) can't be
+        // written any more; leave it out on every side so it's neither sent nor deleted.
+        let tasks = Set(remote.assignments.map(\.id))
+        base?.assignmentCompletions.removeAll { !tasks.contains($0.assignmentID) }
+        local.assignmentCompletions.removeAll { !tasks.contains($0.assignmentID) }
+        remote.assignmentCompletions.removeAll { !tasks.contains($0.assignmentID) }
         if let access = remote.access {
             for section in ProfileSection.allCases where !access.canRead(section) {
                 base = base?.replacing(section, from: nil)
@@ -103,6 +111,8 @@ public enum ProfileMerge {
         }
         outcome.merged.lockedDocs = remote.lockedDocs
         outcome.merged.access = remote.access
+        outcome.merged.assignments = remote.assignments
+        outcome.merged.coachNotes = remote.coachNotes
         return outcome
     }
 
@@ -147,11 +157,15 @@ public enum ProfileMerge {
         changes.programBudgets = TableChanges(upserts: programBudgets.upserts, deletes: programBudgets.deletes)
         let trips = rows(base: base?.trips ?? [], local: local.trips, remote: remote.trips, key: \.id)
         changes.trips = TableChanges(upserts: trips.upserts, deletes: trips.deletes)
+        let completions = rows(base: base?.assignmentCompletions ?? [], local: local.assignmentCompletions, remote: remote.assignmentCompletions,
+                               key: \.key)
+        changes.assignmentCompletions = TableChanges(upserts: completions.upserts, deletes: completions.deletes)
 
         var merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
                                      combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
                                      bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged,
-                                     seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged, trips: trips.merged)
+                                     seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged, trips: trips.merged,
+                                     assignmentCompletions: completions.merged)
         dropTripLinksToDeletedRows(&merged, &changes)
         return Outcome(merged: merged, changes: changes)
     }
@@ -234,6 +248,7 @@ extension ProfileSnapshot {
             copy.combineResults = other?.combineResults ?? []
             copy.wallballDrills = other?.wallballDrills ?? []
             copy.wallballSessions = other?.wallballSessions ?? []
+            copy.assignmentCompletions = other?.assignmentCompletions ?? []
         case .events:
             copy.events = other?.events ?? []
         case .health:
@@ -261,6 +276,7 @@ extension SyncChanges {
             combineResults = .init()
             wallballDrills = .init()
             wallballSessions = .init()
+            assignmentCompletions = .init()
         case .events:
             events = .init()
         case .health:

@@ -109,6 +109,12 @@ public struct AppData: Codable, Equatable, Sendable {
     public var lockedDocs: [LockedMentalDoc]
     /// What the signed-in account can do with this athlete in the cloud. Nil when the athlete isn't in the cloud yet.
     public var access: ProfileAccess?
+    /// Tasks from the athlete's coaches. Read from the cloud; only coaches change them.
+    public var assignments: [Assignment]
+    /// Tasks ticked off by hand, per day, week or one-off task.
+    public var assignmentCompletions: [AssignmentCompletion]
+    /// Coaches' notes on the athlete's games. Read from the cloud.
+    public var coachNotes: [CoachNote]
     /// Height and weight checks. They belong to the athlete, so a blank season keeps them.
     public var bodyMeasurements: [BodyMeasurement]
     /// Drills the athlete added, and built-in drills the athlete changed. Built-ins left as they are aren't stored.
@@ -119,7 +125,8 @@ public struct AppData: Codable, Equatable, Sendable {
     public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [],
                 wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID,
                 seasonBudgets: [SeasonBudget] = [], programBudgets: [ProgramBudget] = [], trips: [Trip] = [],
-                lockedDocs: [LockedMentalDoc] = [], access: ProfileAccess? = nil) {
+                lockedDocs: [LockedMentalDoc] = [], access: ProfileAccess? = nil, assignments: [Assignment] = [],
+                assignmentCompletions: [AssignmentCompletion] = [], coachNotes: [CoachNote] = []) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -134,6 +141,9 @@ public struct AppData: Codable, Equatable, Sendable {
         self.docs = docs
         self.lockedDocs = lockedDocs
         self.access = access
+        self.assignments = assignments
+        self.assignmentCompletions = assignmentCompletions
+        self.coachNotes = coachNotes
         self.bodyMeasurements = bodyMeasurements
         self.wallballDrills = wallballDrills
         self.wallballSessions = wallballSessions
@@ -144,7 +154,7 @@ public struct AppData: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudgets, programBudgets, trips, docs,
-             lockedDocs, access, bodyMeasurements, wallballDrills, wallballSessions, themeID
+             lockedDocs, access, assignments, assignmentCompletions, coachNotes, bodyMeasurements, wallballDrills, wallballSessions, themeID
     }
 
     /// Files saved before budgets per season had one `seasonBudget` for the season the profile was set to.
@@ -174,6 +184,9 @@ public struct AppData: Codable, Equatable, Sendable {
         docs = try c.decodeIfPresent([MentalDoc].self, forKey: .docs) ?? []
         lockedDocs = try c.decodeIfPresent([LockedMentalDoc].self, forKey: .lockedDocs) ?? []
         access = try c.decodeIfPresent(ProfileAccess.self, forKey: .access)
+        assignments = try c.decodeIfPresent([Assignment].self, forKey: .assignments) ?? []
+        assignmentCompletions = try c.decodeIfPresent([AssignmentCompletion].self, forKey: .assignmentCompletions) ?? []
+        coachNotes = try c.decodeIfPresent([CoachNote].self, forKey: .coachNotes) ?? []
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurement].self, forKey: .bodyMeasurements) ?? []
         wallballDrills = try c.decodeIfPresent([WallballDrill].self, forKey: .wallballDrills) ?? []
         wallballSessions = try c.decodeIfPresent([WallballSession].self, forKey: .wallballSessions) ?? []

@@ -100,9 +100,10 @@ final class AppStore {
 
     #if DEBUG
     /// Adds the made-up demo athlete (or rebuilds it around today) and switches to it. Debug builds only; the demo
-    /// stays on this device and isn't a local change, so cloud sync never uploads it.
-    func loadDemoAthlete() {
-        let demo = DemoSeason.make(now: now)
+    /// stays on this device and isn't a local change, so cloud sync never uploads it. With a `viewer`, she looks the
+    /// way she would to that account in the cloud (see `DemoSeason.make(viewer:)`).
+    func loadDemoAthlete(viewer: Relationship? = nil) {
+        let demo = viewer.map { DemoSeason.make(now: now, viewer: $0) } ?? DemoSeason.make(now: now)
         data = demo
         index.upsert(demo.summary)
         index.activeProfileID = demo.id
@@ -289,6 +290,11 @@ final class AppStore {
         update { data in
             if let index = data.docs.firstIndex(where: { $0.id == id }) { data.docs[index].status = status }
         }
+    }
+
+    /// Ticks a coach's task off for its current day, week or one-off span, or unticks it.
+    func setAssignment(_ id: UUID, done: Bool, periodStart: DayKey) {
+        update { $0.setAssignment(id, done: done, periodStart: periodStart) }
     }
 
     /// Only the athlete's own login can lock or hide a doc; the cloud refuses it from anyone else.

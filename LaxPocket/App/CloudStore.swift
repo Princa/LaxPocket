@@ -29,7 +29,40 @@ final class CloudStore {
 
     /// Shows the Coaching workspace: the account is a coach or mental coach, or already has a roster.
     var isCoaching: Bool {
-        isSignedIn && (!rosters.isEmpty || account.map { [.coach, .mentalCoach].contains($0.kind) } == true)
+        #if DEBUG
+        if demoRosters != nil { return true }
+        #endif
+        return isSignedIn && (!rosters.isEmpty || account.map { [.coach, .mentalCoach].contains($0.kind) } == true)
+    }
+
+    #if DEBUG
+    /// Made-up rosters (Theme & settings → Demo data) shown in Coaching instead of the cloud's. Debug builds only;
+    /// never saved, and gone when the app restarts.
+    private(set) var demoRosters: [CoachRoster]?
+
+    /// Previews Coaching with a made-up team or mental-game roster, or stops when `kind` is nil.
+    func showDemoCoaching(_ kind: RosterKind?) {
+        demoRosters = kind.map { DemoSeason.coachRosters(kind: $0) }
+    }
+
+    /// Loads Maya as `viewer` would see her in the cloud (nil: just this phone, as before) and, for a coach or mental
+    /// coach, opens Coaching with a made-up roster.
+    func loadDemo(viewer: Relationship?) {
+        appStore.loadDemoAthlete(viewer: viewer)
+        switch viewer {
+        case .coach: showDemoCoaching(.team)
+        case .mentalCoach: showDemoCoaching(.mental)
+        default: showDemoCoaching(nil)
+        }
+        appStore.showsCoaching = demoRosters != nil
+    }
+    #endif
+
+    /// Changing a made-up roster would go to the cloud, so the preview refuses.
+    private func refuseDemoChanges() throws {
+        #if DEBUG
+        if demoRosters != nil { throw DemoOnlyError() }
+        #endif
     }
     /// What happened when the app was opened from a confirmation email; shown once, then cleared.
     var authNotice: String?
@@ -353,6 +386,7 @@ final class CloudStore {
     }
 
     func removeFromRoster(_ rosterID: UUID, athlete id: UUID) async throws {
+        try refuseDemoChanges()
         guard let client else { return }
         try await CloudSync(client: client).removeFromRoster(rosterID: rosterID, profileID: id)
     }
@@ -366,6 +400,9 @@ final class CloudStore {
 
     /// Every roster with what this account can see of each athlete, read fresh from the cloud.
     func coachWorkspace() async throws -> [CoachRoster] {
+        #if DEBUG
+        if let demoRosters { return demoRosters }
+        #endif
         guard let client else { throw CloudError.notSignedIn }
         let workspace = try await CloudSync(client: client).coachWorkspace()
         rosters = workspace.map { RosterRow(id: $0.id, kind: $0.kind, name: $0.name, joinCode: $0.joinCode) }
@@ -373,6 +410,7 @@ final class CloudStore {
     }
 
     func createRoster(name: String, kind: RosterKind) async throws {
+        try refuseDemoChanges()
         guard let client else { throw CloudError.notSignedIn }
         let cloud = CloudSync(client: client)
         _ = try await cloud.createRoster(name: name, kind: kind)
@@ -380,17 +418,40 @@ final class CloudStore {
     }
 
     func renameRoster(_ id: UUID, to name: String) async throws {
+        try refuseDemoChanges()
         guard let client else { return }
         try await CloudSync(client: client).renameRoster(id, to: name)
     }
 
     /// A new code (the old one stops working), or none to close the roster to new athletes.
     func resetRosterCode(_ id: UUID, open: Bool) async throws -> String? {
+        try refuseDemoChanges()
         guard let client else { return nil }
         return try await CloudSync(client: client).resetRosterCode(id, open: open)
     }
 
+    /// Gives a task, or changes one.
+    func saveAssignment(_ assignment: Assignment) async throws {
+        try refuseDemoChanges()
+        guard let client else { throw CloudError.notSignedIn }
+        try await CloudSync(client: client).saveAssignment(assignment)
+    }
+
+    func deleteAssignment(_ id: UUID) async throws {
+        try refuseDemoChanges()
+        guard let client else { return }
+        try await CloudSync(client: client).deleteAssignment(id)
+    }
+
+    /// Writes this coach's note on an athlete's game; an empty note removes it.
+    func saveCoachNote(event eventID: UUID, athlete id: UUID, note: String) async throws {
+        try refuseDemoChanges()
+        guard let client else { throw CloudError.notSignedIn }
+        try await CloudSync(client: client).saveCoachNote(eventID: eventID, profileID: id, note: note)
+    }
+
     func deleteRoster(_ id: UUID) async throws {
+        try refuseDemoChanges()
         guard let client else { return }
         try await CloudSync(client: client).deleteRoster(id)
         rosters.removeAll { $0.id == id }
@@ -404,4 +465,9 @@ final class CloudStore {
         try await CloudSync(client: client).share(profileID: id, email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                                                   role: canEdit ? .editor : .viewer)
     }
+}
+
+/// A change to the made-up demo rosters, which the preview doesn't make.
+struct DemoOnlyError: LocalizedError {
+    var errorDescription: String? { "This is demo data, so changes aren’t saved." }
 }
