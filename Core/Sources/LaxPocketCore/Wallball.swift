@@ -298,18 +298,7 @@ public enum WallballStats {
     /// so it shows yesterday's run in the morning before today's reps are in.
     public static func streak(_ sessions: [WallballSession], today: Date, calendar: Calendar = .laxWeek) -> Int {
         let days = Set(sessions.filter { $0.reps.total > 0 }.map { calendar.startOfDay(for: $0.date) })
-        var day = calendar.startOfDay(for: today)
-        if !days.contains(day) {
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
-            day = yesterday
-        }
-        var count = 0
-        while days.contains(day) {
-            count += 1
-            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = previous
-        }
-        return count
+        return DailyStreak.count(days: days, today: today, calendar: calendar)
     }
 
     /// The day with the most reps. Nil with no reps.

@@ -54,6 +54,14 @@ public struct CloudSync: Sendable {
                                                   order: "id", as: AthleteAssignmentRow.self)
         let completions = try await client.select(CompletionRow.table, filters: byProfile, order: "assignment_id,period_start", as: CompletionRow.self)
         let coachNotes = try await client.select(AthleteCoachNoteRow.table, filters: byProfile, order: "event_id,coach_id", as: AthleteCoachNoteRow.self)
+        // Only sports with home practice have any; a lacrosse athlete doesn't need the tables.
+        let hasPractice = profile.sport.hasPractice
+        let practiceDrills = hasPractice
+            ? try await client.select(PracticeDrillRow.table, filters: byProfile, order: "sort_order,id", as: PracticeDrillRow.self) : []
+        let practice = hasPractice
+            ? try await client.select(PracticeSessionRow.table, filters: byProfile, order: "id", as: PracticeSessionRow.self) : []
+        let practiceSets = hasPractice
+            ? try await client.select(PracticeSetRow.table, filters: byProfile, order: "session_id,position,drill_id", as: PracticeSetRow.self) : []
 
         return ProfileSnapshot.assemble(profile: profile, programs: programs, sessions: sessions, results: results, measurements: measurements,
                                         events: events, stats: stats, reflections: reflections, focus: focus, videos: videos,
@@ -61,7 +69,8 @@ public struct CloudSync: Sendable {
                                         wallballDrills: drills, wallballSessions: wallball, wallballSets: wallballSets,
                                         seasonBudgets: seasonBudgets, programBudgets: programBudgets, trips: trips,
                                         lockedDocs: lockedDocs, access: access, assignments: assignments,
-                                        assignmentCompletions: completions, coachNotes: coachNotes)
+                                        assignmentCompletions: completions, coachNotes: coachNotes,
+                                        practiceDrills: practiceDrills, practiceSessions: practice, practiceSets: practiceSets)
     }
 
     /// Writes changes for one profile. Parents go before children and deletes go last, so foreign keys hold at every step.
@@ -107,6 +116,12 @@ public struct CloudSync: Sendable {
         try await client.upsert(wallball.map(\.session))
         try await client.delete(WallballSetRow.table, where: "session_id", in: wallball.map { $0.id.uuidString.lowercased() }, filters: byProfile)
         try await client.upsert(wallball.flatMap(\.sets))
+        // A changed practice session replaces its sets the same way.
+        try await client.upsert(changes.practiceDrills.upserts)
+        let practice = changes.practiceSessions.upserts
+        try await client.upsert(practice.map(\.session))
+        try await client.delete(PracticeSetRow.table, where: "session_id", in: practice.map { $0.id.uuidString.lowercased() }, filters: byProfile)
+        try await client.upsert(practice.flatMap(\.sets))
         try await client.upsert(changes.assignmentCompletions.upserts)
 
         func ids(_ keys: [UUID]) -> [String] { keys.map { $0.uuidString.lowercased() } }
@@ -119,6 +134,8 @@ public struct CloudSync: Sendable {
         try await client.delete(BodyMeasurementRow.table, where: "id", in: ids(changes.bodyMeasurements.deletes), filters: byProfile)
         try await client.delete(WallballSessionRow.table, where: "id", in: ids(changes.wallballSessions.deletes), filters: byProfile)
         try await client.delete(WallballDrillRow.table, where: "id", in: changes.wallballDrills.deletes, filters: byProfile)
+        try await client.delete(PracticeSessionRow.table, where: "id", in: ids(changes.practiceSessions.deletes), filters: byProfile)
+        try await client.delete(PracticeDrillRow.table, where: "id", in: changes.practiceDrills.deletes, filters: byProfile)
         try await client.delete(SeasonBudgetRow.table, where: "season", in: changes.seasonBudgets.deletes.map(String.init), filters: byProfile)
         for (programID, keys) in Dictionary(grouping: changes.programBudgets.deletes, by: \.programID).sorted(by: { $0.key < $1.key }) {
             try await client.delete(ProgramBudgetRow.table, where: "season", in: keys.map { String($0.season) },
@@ -366,6 +383,12 @@ extension CloudSync {
         rows.lockedDocs = try await select(LockedMentalDocRow.table, where: "profile_id", in: ids, order: "id")
         rows.completions = try await select(CompletionRow.table, where: "profile_id", in: ids, order: "assignment_id,period_start")
         rows.coachNotes = try await select(AthleteCoachNoteRow.table, where: "profile_id", in: ids, order: "event_id,coach_id")
+        let practiceIDs = rows.profiles.filter { $0.sport.hasPractice }.map { $0.id.uuidString.lowercased() }
+        rows.practiceDrills = try await select(PracticeDrillRow.table, where: "profile_id", in: practiceIDs, order: "sort_order,id")
+        rows.practiceSessions = try await select(PracticeSessionRow.table, where: "profile_id", in: practiceIDs,
+                                                 filters: [URLQueryItem(name: "done_at", value: "gte.\(since)")], order: "id")
+        rows.practiceSets = try await select(PracticeSetRow.table, where: "session_id", in: rows.practiceSessions.map(\.id.uuidString),
+                                             order: "session_id,position,drill_id")
         return CoachWorkspace.assemble(rosters: rosters, places: places, rows: rows)
     }
 
@@ -399,6 +422,9 @@ enum CoachWorkspace {
         var assignments: [AssignmentRow] = []
         var completions: [CompletionRow] = []
         var coachNotes: [AthleteCoachNoteRow] = []
+        var practiceDrills: [PracticeDrillRow] = []
+        var practiceSessions: [PracticeSessionRow] = []
+        var practiceSets: [PracticeSetRow] = []
     }
 
     static func assemble(rosters: [RosterRow], places: [RosterAthleteRow], rows: Rows) -> [CoachRoster] {
@@ -410,6 +436,8 @@ enum CoachWorkspace {
         let focus = byProfile(rows.focus, \.profileID), docs = byProfile(rows.docs, \.profileID)
         let locked = byProfile(rows.lockedDocs, \.profileID)
         let completions = byProfile(rows.completions, \.profileID), notes = byProfile(rows.coachNotes, \.profileID)
+        let practiceDrills = byProfile(rows.practiceDrills, \.profileID), practice = byProfile(rows.practiceSessions, \.profileID)
+        let practiceSets = byProfile(rows.practiceSets, \.profileID)
         let rosterNames = Dictionary(uniqueKeysWithValues: rosters.map { ($0.id, $0.name) })
         let tasks = rows.assignments.map { $0.assignment(rosterName: rosterNames[$0.rosterID] ?? "") }
         let kindsByProfile = Dictionary(grouping: places, by: \.profileID).mapValues { list in
@@ -425,7 +453,8 @@ enum CoachWorkspace {
                 videos: [], checklist: [], expenses: [], docs: docs[id] ?? [], bodyMeasurements: [], wallballDrills: drills[id] ?? [],
                 wallballSessions: wallball[id] ?? [], wallballSets: sets[id] ?? [], lockedDocs: locked[id] ?? [],
                 access: ProfileAccess(role: .viewer, relationships: kindsByProfile[id] ?? []),
-                assignmentCompletions: completions[id] ?? [], coachNotes: notes[id] ?? [])
+                assignmentCompletions: completions[id] ?? [], coachNotes: notes[id] ?? [], practiceDrills: practiceDrills[id] ?? [],
+                practiceSessions: practice[id] ?? [], practiceSets: practiceSets[id] ?? [])
             var data = snapshot.appData
             let onRosters = Set(places.filter { $0.profileID == id }.map(\.rosterID))
             data.assignments = tasks.filter { onRosters.contains($0.rosterID) && $0.isFor(id) }
@@ -466,7 +495,9 @@ extension ProfileSnapshot {
                          wallballSessions: [WallballSessionRow] = [], wallballSets: [WallballSetRow] = [],
                          seasonBudgets: [SeasonBudgetRow] = [], programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = [],
                          lockedDocs: [LockedMentalDocRow] = [], access: ProfileAccess? = nil, assignments: [AthleteAssignmentRow] = [],
-                         assignmentCompletions: [CompletionRow] = [], coachNotes: [AthleteCoachNoteRow] = []) -> ProfileSnapshot {
+                         assignmentCompletions: [CompletionRow] = [], coachNotes: [AthleteCoachNoteRow] = [],
+                         practiceDrills: [PracticeDrillRow] = [], practiceSessions: [PracticeSessionRow] = [],
+                         practiceSets: [PracticeSetRow] = []) -> ProfileSnapshot {
         let metricOrder = Dictionary(uniqueKeysWithValues: CombineMetric.allCases.enumerated().map { ($1, $0) })
         let measurementsByResult = Dictionary(grouping: measurements, by: \.resultID)
         let statsByEvent = Dictionary(stats.map { ($0.eventID, $0) }, uniquingKeysWith: { a, _ in a })
@@ -475,6 +506,7 @@ extension ProfileSnapshot {
         let videosByEvent = Dictionary(grouping: videos, by: \.eventID)
         let checklistByEvent = Dictionary(grouping: checklist, by: \.eventID)
         let setsBySession = Dictionary(grouping: wallballSets, by: \.sessionID)
+        let practiceSetsBySession = Dictionary(grouping: practiceSets, by: \.sessionID)
 
         return ProfileSnapshot(
             profile: profile,
@@ -503,7 +535,11 @@ extension ProfileSnapshot {
             access: access,
             assignments: assignments,
             assignmentCompletions: assignmentCompletions,
-            coachNotes: coachNotes
+            coachNotes: coachNotes,
+            practiceDrills: practiceDrills,
+            practiceSessions: practiceSessions.map { s in
+                PracticeBundle(session: s, sets: (practiceSetsBySession[s.id] ?? []).sorted { $0.position < $1.position })
+            }
         )
     }
 }

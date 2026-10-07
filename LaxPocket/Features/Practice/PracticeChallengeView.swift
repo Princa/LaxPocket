@@ -1,10 +1,10 @@
 import SwiftUI
-import AudioToolbox
 import LaxPocketCore
 
-/// A timed wall ball challenge: pick drills and a time, then each drill and hand gets the same time on the clock.
-/// After each round the athlete enters the catches (or taps them in as they go), and the results are saved as a session.
-struct WallballChallengeView: View {
+/// A timed practice challenge: pick drills and a time, and each drill gets that time on the clock. After each round the
+/// athlete enters what they counted (touches, shots, passes) or taps them in as they go, and the results are saved as a
+/// session. Built like the wall ball challenge, without hands.
+struct PracticeChallengeView: View {
     private enum Phase: Equatable {
         case setup
         case getReady(round: Int, until: Date)
@@ -21,9 +21,9 @@ struct WallballChallengeView: View {
     @State private var phase: Phase = .setup
     @State private var picked: Set<String>
     @State private var seconds: Int
-    @State private var hands: WallballChallenge.Hands = .rightAndLeft
-    @State private var rounds: [DrillHand] = []
-    /// Reps for each round; nil until entered, or when skipped.
+    /// Drill IDs, one round each.
+    @State private var rounds: [String] = []
+    /// The count for each round; nil until entered, or when skipped.
     @State private var results: [Int?] = []
     @State private var tapCount = 0
     @State private var startedAt = Date()
@@ -31,15 +31,14 @@ struct WallballChallengeView: View {
     @State private var confirmEnd = false
     @State private var confirmDiscard = false
 
-    init(lastChallenge: WallballSession? = nil) {
-        _picked = State(initialValue: Set(lastChallenge?.sets.map(\.drillID) ?? []))
-        _seconds = State(initialValue: lastChallenge?.challengeSeconds ?? WallballChallenge.defaultLength)
+    init(lastChallenge: PracticeSession? = nil) {
+        // A first challenge starts with quick hands: touches in 30 seconds.
+        _picked = State(initialValue: Set(lastChallenge?.sets.map(\.drillID) ?? ["quick-hands"]))
+        _seconds = State(initialValue: lastChallenge?.challengeSeconds ?? PracticeChallenge.defaultLength)
     }
 
-    private var drills: [WallballDrill] { store.data.wallballLibrary.filter { !$0.isHidden } }
-    private var pickedDrills: [WallballDrill] { drills.filter { picked.contains($0.id) } }
-    /// Bests from earlier challenges of this length.
-    private var bests: [DrillHand: ChallengeBest] { WallballStats.challengeBests(store.data.wallballSessions, seconds: seconds) }
+    private var drills: [PracticeDrill] { store.data.practiceLibrary.filter { !$0.isHidden } }
+    private var bests: [String: ChallengeBest] { PracticeStats.challengeBests(store.data.practiceSessions, seconds: seconds) }
 
     private var isTimed: Bool {
         switch phase {
@@ -81,18 +80,22 @@ struct WallballChallengeView: View {
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
+    private func drill(_ id: String) -> PracticeDrill? { store.data.practiceDrill(id: id) }
+    private func name(_ id: String) -> String { drill(id)?.name ?? "Drill" }
+    private func noun(_ id: String) -> String { drill(id)?.kind.challengeNoun ?? "reps" }
+
     // MARK: - Setup
 
     private var setup: some View {
-        let roundsPlanned = WallballChallenge.rounds(pickedDrills, hands: hands)
+        let planned = drills.filter { picked.contains($0.id) }.map(\.id)
         let bests = self.bests
         return NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Eyebrow(text: "Time per drill and hand", color: AppTheme.caption)
+                        Eyebrow(text: "Time per drill", color: AppTheme.caption)
                         HStack(spacing: 6) {
-                            ForEach(WallballChallenge.lengths, id: \.self) { length in
+                            ForEach(PracticeChallenge.lengths, id: \.self) { length in
                                 Button(shortLength(length)) { seconds = length }
                                     .buttonStyle(QuickButtonStyle(color: theme.primary, filled: seconds == length, expands: true))
                                     .accessibilityLabel(WallballChallenge.lengthText(length))
@@ -101,27 +104,17 @@ struct WallballChallengeView: View {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Eyebrow(text: "Hands", color: AppTheme.caption)
-                        Picker("Hands", selection: $hands) {
-                            ForEach(WallballChallenge.Hands.allCases) { Text($0.title).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Eyebrow(text: "Drills", color: AppTheme.caption)
-                            Spacer()
-                            Button(picked.count == drills.count ? "Clear" : "Pick all") {
-                                picked = picked.count == drills.count ? [] : Set(drills.map(\.id))
-                            }
-                            .font(.system(size: 14, weight: .semibold))
-                        }
-                        Card(padding: 0, radius: 14) {
-                            ForEach(Array(drills.enumerated()), id: \.element.id) { index, drill in
-                                drillRow(drill, bests: bests)
-                                if index < drills.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 52) }
+                    ForEach(PracticeKind.allCases) { kind in
+                        let inKind = drills.filter { $0.kind == kind }
+                        if !inKind.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Eyebrow(text: "\(kind.title) · counts \(kind.challengeNoun)", color: theme.color(for: kind))
+                                Card(padding: 0, radius: 14) {
+                                    ForEach(Array(inKind.enumerated()), id: \.element.id) { index, drill in
+                                        drillRow(drill, best: bests[drill.id])
+                                        if index < inKind.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 52) }
+                                    }
+                                }
                             }
                         }
                     }
@@ -131,13 +124,13 @@ struct WallballChallengeView: View {
             .background(AppTheme.background)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
-                    Text(roundsPlanned.isEmpty ? "Pick the drills to time" : planText(roundsPlanned.count))
+                    Text(planned.isEmpty ? "Pick the drills to time" : planText(planned.count))
                         .font(.system(size: 13))
                         .foregroundStyle(AppTheme.muted)
-                    Button { start(roundsPlanned) } label: { Label("Start challenge", systemImage: "play.fill") }
+                    Button { start(planned) } label: { Label("Start challenge", systemImage: "play.fill") }
                         .buttonStyle(PrimaryButtonStyle(color: theme.primary))
-                        .disabled(roundsPlanned.isEmpty)
-                        .opacity(roundsPlanned.isEmpty ? 0.5 : 1)
+                        .disabled(planned.isEmpty)
+                        .opacity(planned.isEmpty ? 0.5 : 1)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
@@ -152,24 +145,22 @@ struct WallballChallengeView: View {
         }
     }
 
-    private func drillRow(_ drill: WallballDrill, bests: [DrillHand: ChallengeBest]) -> some View {
+    private func drillRow(_ drill: PracticeDrill, best: ChallengeBest?) -> some View {
         let isOn = picked.contains(drill.id)
-        let best = drill.hands.hands.compactMap { hand in
-            bests[DrillHand(drillID: drill.id, hand: hand)].map { drill.hands == .each ? "\(hand.letter) \($0.reps)" : "\($0.reps)" }
-        }
         return Button {
             if isOn { picked.remove(drill.id) } else { picked.insert(drill.id) }
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 24))
-                    .foregroundStyle(isOn ? theme.primary : AppTheme.border)
+                    .foregroundStyle(isOn ? theme.color(for: drill.kind) : AppTheme.border)
                     .frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(drill.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(AppTheme.ink)
-                    Text(best.isEmpty ? drill.hands.title : "Best in \(shortLength(seconds)): \(best.joined(separator: " · "))")
+                    Text(best.map { "Best in \(shortLength(seconds)): \($0.reps) \(drill.kind.challengeNoun)" } ?? drill.detail)
                         .font(.system(size: 13))
                         .foregroundStyle(AppTheme.caption)
+                        .lineLimit(1)
                 }
                 Spacer()
             }
@@ -182,7 +173,7 @@ struct WallballChallengeView: View {
     }
 
     private func planText(_ count: Int) -> String {
-        let total = count * (seconds + WallballChallenge.getReadySeconds)
+        let total = count * (seconds + PracticeChallenge.getReadySeconds)
         let minutes = max(1, Int((Double(total) / 60).rounded()))
         return "\(count) round\(count == 1 ? "" : "s") of \(WallballChallenge.lengthText(seconds)) · about \(minutes) min"
     }
@@ -258,7 +249,7 @@ struct WallballChallengeView: View {
             } label: {
                 VStack(spacing: 4) {
                     Text("\(tapCount)").font(.display(56)).monospacedDigit()
-                    Text("Tap to count catches (optional)").font(.system(size: 14, weight: .semibold))
+                    Text("Tap to count \(noun(rounds[round])) (optional)").font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundStyle(theme.primary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -268,7 +259,7 @@ struct WallballChallengeView: View {
             .buttonStyle(.plain)
             .disabled(paused != nil)
             .opacity(paused != nil ? 0.6 : 1)
-            .accessibilityLabel("Count a catch")
+            .accessibilityLabel("Count one")
             .accessibilityValue("\(tapCount)")
 
             HStack(spacing: 12) {
@@ -308,15 +299,15 @@ struct WallballChallengeView: View {
     }
 
     private func drillTitle(_ round: Int) -> some View {
-        let item = rounds[round]
+        let id = rounds[round]
         return VStack(spacing: 8) {
-            Text(store.data.wallballDrill(id: item.drillID)?.name ?? "Drill")
+            Text(name(id))
                 .font(.display(40))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.6)
                 .lineLimit(2)
-            Text(item.hand == .both ? "BOTH HANDS" : "\(item.hand.title.uppercased()) HAND")
+            Text("COUNT \(noun(id).uppercased())")
                 .font(.system(size: 14, weight: .bold))
                 .tracking(1)
                 .foregroundStyle(theme.primary)
@@ -329,22 +320,20 @@ struct WallballChallengeView: View {
     // MARK: - Entry
 
     private func entry(_ round: Int) -> some View {
-        let item = rounds[round]
+        let id = rounds[round]
         let value = results[round] ?? tapCount
-        let best = bests[item]
+        let best = bests[id]
         let isBest = value > 0 && value > (best?.reps ?? 0)
         let isLast = round == rounds.count - 1
         return NavigationStack {
             VStack(spacing: 20) {
                 VStack(spacing: 4) {
-                    Text(store.data.wallballDrill(id: item.drillID)?.name ?? "Drill").font(.display(30))
-                    Text("\(item.hand == .both ? "Both hands" : "\(item.hand.title) hand") · \(WallballChallenge.lengthText(seconds))")
-                        .font(.system(size: 15))
-                        .foregroundStyle(AppTheme.muted)
+                    Text(name(id)).font(.display(30))
+                    Text(WallballChallenge.lengthText(seconds)).font(.system(size: 15)).foregroundStyle(AppTheme.muted)
                 }
                 .padding(.top, 12)
 
-                Text("How many catches?").font(.system(size: 17, weight: .semibold))
+                Text("How many \(noun(id))?").font(.system(size: 17, weight: .semibold))
 
                 HStack(spacing: 10) {
                     adjust(-5, round: round, value: value)
@@ -354,7 +343,7 @@ struct WallballChallengeView: View {
                         .monospacedDigit()
                         .foregroundStyle(theme.primary)
                         .frame(minWidth: 120)
-                        .accessibilityLabel("\(value) catches")
+                        .accessibilityLabel("\(value) \(noun(id))")
                     adjust(1, round: round, value: value)
                     adjust(5, round: round, value: value)
                 }
@@ -372,7 +361,7 @@ struct WallballChallengeView: View {
                 Spacer()
 
                 VStack(spacing: 10) {
-                    Button(isLast ? "Finish" : "Next: \(nextTitle(round))") {
+                    Button(isLast ? "Finish" : "Next: \(name(rounds[round + 1]))") {
                         results[round] = value
                         next(after: round)
                     }
@@ -382,7 +371,7 @@ struct WallballChallengeView: View {
                         Button("Redo round") {
                             results[round] = nil
                             tapCount = 0
-                            phase = .getReady(round: round, until: Date().addingTimeInterval(TimeInterval(WallballChallenge.getReadySeconds)))
+                            phase = .getReady(round: round, until: Date().addingTimeInterval(TimeInterval(PracticeChallenge.getReadySeconds)))
                         }
                         .buttonStyle(QuickButtonStyle(color: theme.primary, filled: false, expands: true))
                         Button("Skip") {
@@ -407,7 +396,7 @@ struct WallballChallengeView: View {
 
     private func adjust(_ delta: Int, round: Int, value: Int) -> some View {
         Button {
-            results[round] = min(max(value + delta, 0), WallballSet.repsRange.upperBound)
+            results[round] = min(max(value + delta, 0), PracticeSet.amountRange.upperBound)
         } label: {
             Text(delta > 0 ? "+\(delta)" : "−\(abs(delta))")
                 .font(.system(size: 16, weight: .bold))
@@ -421,32 +410,21 @@ struct WallballChallengeView: View {
         .accessibilityLabel(delta > 0 ? "\(delta) more" : "\(abs(delta)) fewer")
     }
 
-    private func nextTitle(_ round: Int) -> String {
-        let item = rounds[round + 1]
-        let name = store.data.wallballDrill(id: item.drillID)?.name ?? "Drill"
-        return item.hand == .both ? name : "\(name) · \(item.hand.letter)"
-    }
-
     // MARK: - Summary
 
     private var summary: some View {
         let bests = self.bests
         let done = rounds.indices.compactMap { index in results[index].map { (index, rounds[index], $0) } }.filter { $0.2 > 0 }
-        let total = done.reduce(0) { $0 + $1.2 }
         let newBests = done.filter { $0.2 > (bests[$0.1]?.reps ?? 0) }.count
         return NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Card(padding: 20, radius: 20) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Challenge total").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(total.formatted()).font(.display(52)).foregroundStyle(theme.primary)
-                                Text("catches").font(.display(20, weight: .semibold)).foregroundStyle(theme.primary)
-                            }
+                            Text("Challenge").font(.system(size: 13)).foregroundStyle(AppTheme.caption)
                             Text("\(done.count) of \(rounds.count) round\(rounds.count == 1 ? "" : "s") · \(WallballChallenge.lengthText(seconds)) each")
-                                .font(.system(size: 14))
-                                .foregroundStyle(AppTheme.ink2)
+                                .font(.display(24))
+                                .foregroundStyle(theme.primary)
                             if newBests > 0 {
                                 Pill(text: newBests == 1 ? "1 new best" : "\(newBests) new bests", background: theme.accentTint,
                                      foreground: theme.accentText, systemImage: "trophy.fill")
@@ -456,19 +434,18 @@ struct WallballChallengeView: View {
                     }
 
                     Card(padding: 0) {
-                        ForEach(Array(rounds.enumerated()), id: \.offset) { index, item in
-                            let reps = results[index] ?? 0
-                            let isBest = reps > 0 && reps > (bests[item]?.reps ?? 0)
+                        ForEach(Array(rounds.enumerated()), id: \.offset) { index, id in
+                            let count = results[index] ?? 0
+                            let isBest = count > 0 && count > (bests[id]?.reps ?? 0)
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(store.data.wallballDrill(id: item.drillID)?.name ?? "Drill").font(.system(size: 15, weight: .semibold))
-                                    Text(item.hand == .both ? "Both hands" : "\(item.hand.title) hand")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(theme.color(for: item.hand))
+                                    Text(name(id)).font(.system(size: 15, weight: .semibold))
+                                    Text(noun(id).capitalized).font(.system(size: 13))
+                                        .foregroundStyle(drill(id).map { theme.color(for: $0.kind) } ?? AppTheme.caption)
                                 }
                                 Spacer()
                                 if isBest { Image(systemName: "trophy.fill").foregroundStyle(theme.accentText).accessibilityLabel("New best") }
-                                Text(results[index] == nil ? "Skipped" : "\(reps)")
+                                Text(results[index] == nil ? "Skipped" : "\(count)")
                                     .font(results[index] == nil ? .system(size: 14) : .display(22))
                                     .foregroundStyle(results[index] == nil ? AppTheme.caption : AppTheme.ink)
                             }
@@ -490,8 +467,8 @@ struct WallballChallengeView: View {
             .safeAreaInset(edge: .bottom) {
                 Button("Save challenge") { save() }
                     .buttonStyle(PrimaryButtonStyle(color: theme.primary))
-                    .disabled(total == 0)
-                    .opacity(total == 0 ? 0.5 : 1)
+                    .disabled(done.isEmpty)
+                    .opacity(done.isEmpty ? 0.5 : 1)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .background(.bar)
@@ -509,12 +486,12 @@ struct WallballChallengeView: View {
 
     // MARK: - Flow
 
-    private func start(_ planned: [DrillHand]) {
+    private func start(_ planned: [String]) {
         rounds = planned
         results = Array(repeating: nil, count: planned.count)
         startedAt = Date()
         tapCount = 0
-        phase = .getReady(round: 0, until: Date().addingTimeInterval(TimeInterval(WallballChallenge.getReadySeconds)))
+        phase = .getReady(round: 0, until: Date().addingTimeInterval(TimeInterval(PracticeChallenge.getReadySeconds)))
     }
 
     private func finishRound(_ round: Int) {
@@ -528,7 +505,7 @@ struct WallballChallengeView: View {
             return
         }
         tapCount = 0
-        phase = .getReady(round: round + 1, until: Date().addingTimeInterval(TimeInterval(WallballChallenge.getReadySeconds)))
+        phase = .getReady(round: round + 1, until: Date().addingTimeInterval(TimeInterval(PracticeChallenge.getReadySeconds)))
     }
 
     /// Runs the clock for the current phase. A new phase cancels it.
@@ -566,13 +543,11 @@ struct WallballChallengeView: View {
     }
 
     private func save() {
-        let sets = rounds.indices.compactMap { index in
-            results[index].map { WallballSet(drillID: rounds[index].drillID, hand: rounds[index].hand, reps: $0) }
-        }
-        let normalized = WallballSession.normalized(sets)
+        let sets = rounds.indices.compactMap { index in results[index].map { PracticeSet(drillID: rounds[index], amount: $0) } }
+        let normalized = PracticeSession.normalized(sets)
         guard !normalized.isEmpty else { return }
         let minutes = max(1, Int(ceil(Double(normalized.count * seconds) / 60)))
-        store.saveWallballSession(WallballSession(date: startedAt, sets: normalized, minutes: minutes, challengeSeconds: seconds,
+        store.savePracticeSession(PracticeSession(date: startedAt, sets: normalized, minutes: minutes, challengeSeconds: seconds,
                                                   notes: notes.trimmingCharacters(in: .whitespacesAndNewlines)))
         dismiss()
     }
@@ -580,35 +555,5 @@ struct WallballChallengeView: View {
     private func clock(_ remaining: TimeInterval) -> String {
         let whole = Int(ceil(remaining))
         return String(format: "%d:%02d", whole / 60, whole % 60)
-    }
-}
-
-/// Sounds and haptics for a challenge clock (wall ball and hockey practice). Sounds follow the ring/silent switch.
-enum ChallengeFeedback {
-    static func tick() {
-        AudioServicesPlaySystemSound(1057)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    static func go() {
-        AudioServicesPlaySystemSound(1113)
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-    }
-
-    static func roundOver() {
-        AudioServicesPlaySystemSound(1005)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-    }
-}
-
-/// White outlined button on the primary-colour challenge screens.
-struct OnPrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(.white.opacity(configuration.isPressed ? 0.25 : 0.15), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.5)))
     }
 }

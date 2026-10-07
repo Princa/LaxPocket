@@ -31,6 +31,9 @@ backend (`supabase/`). See README.md for what each screen does.
 - The app is called SportsPocket on the phone; the bundle ID (`com.princa.laxpocket`), URL scheme, Xcode project,
   `LaxPocketCore` and the storage folder keep the LaxPocket name. Never change the bundle ID or the storage folder:
   phones would lose the athletes saved on them.
+- Several Claude sessions can work in this one checkout. Don't stash, reset or switch branches over changes you didn't
+  make, and commit your own work to its branch at each milestone: another session once stashed half-done work and
+  switched branches under it.
 - Check before pushing:
   - `cd Core && swift test`
   - `supabase/tests/run-local.sh` when a migration or `supabase/tests/rls_test.sql` changes (needs a local Postgres)

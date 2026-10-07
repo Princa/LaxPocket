@@ -116,16 +116,29 @@ final class AppStore {
     }
 
     #if DEBUG
-    /// Adds the made-up demo athlete (or rebuilds it around today) and switches to it. Debug builds only; the demo
-    /// stays on this device and isn't a local change, so cloud sync never uploads it. With a `viewer`, she looks the
-    /// way she would to that account in the cloud (see `DemoSeason.make(viewer:)`).
-    func loadDemoAthlete(viewer: Relationship? = nil) {
-        let demo = viewer.map { DemoSeason.make(now: now, viewer: $0) } ?? DemoSeason.make(now: now)
-        data = demo
-        index.upsert(demo.summary)
-        index.activeProfileID = demo.id
+    /// Adds the made-up demo athlete in each of her sports (or rebuilds her around today) and switches to her profile
+    /// for `sport`. Debug builds only; the demo stays on this device and isn't a local change, so cloud sync never
+    /// uploads it. With a `viewer`, she looks the way she would to that account in the cloud (see
+    /// `DemoSeason.make(viewer:)`).
+    func loadDemoAthlete(viewer: Relationship? = nil, sport: Sport = .lacrosse) {
+        let profiles = DemoSeason.profiles(now: now, viewer: viewer)
+        // A sport added to her by hand would sit beside the demo's own profile for it.
+        let loaded = Set(profiles.map(\.id))
+        for stale in index.profiles where stale.isDemo && !loaded.contains(stale.id) {
+            try? library.deleteProfile(stale.id)
+            index.remove(stale.id)
+        }
+        for profile in profiles {
+            do {
+                try library.saveProfile(profile)
+            } catch {
+                print("LaxPocket: could not save profile – \(error)")
+            }
+            index.upsert(profile.summary)
+        }
+        data = profiles.first { $0.profile.sport == sport } ?? profiles[0]
+        index.activeProfileID = data.id
         selectedTab = .home
-        saveProfile()
         saveIndex()
     }
     #endif
@@ -402,6 +415,64 @@ final class AppStore {
     func resetWallballDrill(_ id: String) {
         guard WallballCatalog.builtInIDs.contains(id) else { return }
         update { $0.wallballDrills.removeAll { $0.id == id } }
+    }
+
+    /// Adds the practice session, or replaces the one with the same ID.
+    func savePracticeSession(_ session: PracticeSession) {
+        update { data in
+            if let index = data.practiceSessions.firstIndex(where: { $0.id == session.id }) {
+                data.practiceSessions[index] = session
+            } else {
+                data.practiceSessions.append(session)
+            }
+        }
+    }
+
+    func deletePracticeSessions(_ ids: Set<UUID>) {
+        update { $0.practiceSessions.removeAll { ids.contains($0.id) } }
+    }
+
+    /// Saves a practice drill the athlete added or changed. A built-in put back the way it ships isn't stored.
+    func savePracticeDrill(_ drill: PracticeDrill) {
+        update { data in
+            let index = data.practiceDrills.firstIndex { $0.id == drill.id }
+            if PracticeCatalog.builtIn(id: drill.id) == drill {
+                if let index { data.practiceDrills.remove(at: index) }
+            } else if let index {
+                data.practiceDrills[index] = drill
+            } else {
+                data.practiceDrills.append(drill)
+            }
+        }
+    }
+
+    /// True once something is logged with the drill: then it can be hidden but not deleted, and its measure stays.
+    func isPracticeDrillUsed(_ id: String) -> Bool {
+        data.practiceSessions.contains { $0.sets.contains { $0.drillID == id } }
+    }
+
+    /// Only the athlete's own drills with nothing logged can be deleted; the rest can be hidden.
+    func canDeletePracticeDrill(_ id: String) -> Bool {
+        !PracticeCatalog.builtInIDs.contains(id) && !isPracticeDrillUsed(id)
+    }
+
+    func deletePracticeDrill(_ id: String) {
+        guard canDeletePracticeDrill(id) else { return }
+        update { $0.practiceDrills.removeAll { $0.id == id } }
+    }
+
+    /// Puts a built-in practice drill back the way it ships.
+    func resetPracticeDrill(_ id: String) {
+        guard PracticeCatalog.builtInIDs.contains(id) else { return }
+        update { $0.practiceDrills.removeAll { $0.id == id } }
+    }
+
+    /// The athlete's weekly shot and stickhandling goals; 0 for no goal.
+    func setPracticeGoals(shots: Int, stickhandlingMinutes: Int) {
+        update { data in
+            data.profile.weeklyShotGoal = min(max(shots, 0), AthleteProfile.weeklyShotGoalRange.upperBound)
+            data.profile.weeklyStickhandlingGoal = min(max(stickhandlingMinutes, 0), AthleteProfile.weeklyStickhandlingGoalRange.upperBound)
+        }
     }
 
     func setTheme(_ palette: ThemePalette) {

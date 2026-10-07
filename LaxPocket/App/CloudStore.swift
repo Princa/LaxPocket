@@ -40,18 +40,18 @@ final class CloudStore {
     /// never saved, and gone when the app restarts.
     private(set) var demoRosters: [CoachRoster]?
 
-    /// Previews Coaching with a made-up team or mental-game roster, or stops when `kind` is nil.
-    func showDemoCoaching(_ kind: RosterKind?) {
-        demoRosters = kind.map { DemoSeason.coachRosters(kind: $0) }
+    /// Previews Coaching with a made-up team or mental-game roster for `sport`, or stops when `kind` is nil.
+    func showDemoCoaching(_ kind: RosterKind?, sport: Sport = .lacrosse) {
+        demoRosters = kind.map { DemoSeason.coachRosters(kind: $0, sport: sport) }
     }
 
-    /// Loads Maya as `viewer` would see her in the cloud (nil: just this phone, as before) and, for a coach or mental
-    /// coach, opens Coaching with a made-up roster.
-    func loadDemo(viewer: Relationship?) {
-        appStore.loadDemoAthlete(viewer: viewer)
+    /// Loads Maya as `viewer` would see her in the cloud (nil: just this phone, as before), showing her `sport` profile,
+    /// and, for a coach or mental coach, opens Coaching with a made-up roster for that sport.
+    func loadDemo(viewer: Relationship?, sport: Sport = .lacrosse) {
+        appStore.loadDemoAthlete(viewer: viewer, sport: sport)
         switch viewer {
-        case .coach: showDemoCoaching(.team)
-        case .mentalCoach: showDemoCoaching(.mental)
+        case .coach: showDemoCoaching(.team, sport: sport)
+        case .mentalCoach: showDemoCoaching(.mental, sport: sport)
         default: showDemoCoaching(nil)
         }
         appStore.showsCoaching = demoRosters != nil

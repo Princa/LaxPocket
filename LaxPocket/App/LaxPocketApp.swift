@@ -11,14 +11,17 @@ struct LaxPocketApp: App {
         let store = AppStore()
         let cloud = CloudStore(appStore: store)
         #if DEBUG
-        // `-demo` (e.g. `xcrun simctl launch booted com.princa.laxpocket -demo`) loads the made-up demo athlete, and
-        // `-demo-as parent|athlete|coach|mentalCoach` loads her as that account would see her in the cloud.
+        // `-demo` (e.g. `xcrun simctl launch booted com.princa.laxpocket -demo`) loads the made-up demo athlete,
+        // `-demo-as parent|athlete|coach|mentalCoach` loads her as that account would see her in the cloud, and
+        // `-demo-sport hockey` opens her hockey profile (and a coach's hockey roster) instead of lacrosse.
         let arguments = ProcessInfo.processInfo.arguments
+        let sport = arguments.firstIndex(of: "-demo-sport").flatMap { $0 + 1 < arguments.count ? Sport(rawValue: arguments[$0 + 1]) : nil }
+            ?? .lacrosse
         if let index = arguments.firstIndex(of: "-demo-as"), index + 1 < arguments.count,
            let viewer = Relationship(rawValue: arguments[index + 1]) {
-            cloud.loadDemo(viewer: viewer)
-        } else if arguments.contains("-demo") {
-            cloud.loadDemo(viewer: nil)
+            cloud.loadDemo(viewer: viewer, sport: sport)
+        } else if arguments.contains("-demo") || arguments.contains("-demo-sport") {
+            cloud.loadDemo(viewer: nil, sport: sport)
         }
         #endif
         _store = State(initialValue: store)

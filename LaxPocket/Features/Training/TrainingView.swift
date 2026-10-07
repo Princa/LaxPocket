@@ -48,6 +48,9 @@ struct TrainingView: View {
                 if store.sport.hasWallball {
                     WallballCard()
                 }
+                if store.sport.hasPractice {
+                    PracticeCard()
+                }
 
                 Picker("Range", selection: $range) {
                     ForEach(Range.allCases) { Text($0.rawValue).tag($0) }

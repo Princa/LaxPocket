@@ -31,7 +31,8 @@ public enum RosterKind: String, Codable, CaseIterable, Identifiable, Sendable {
     public func sharingSummary(for sport: Sport) -> String {
         switch self {
         case .team:
-            let training = sport.hasWallball ? "Training, wall ball, combine results" : "Training, testing"
+            let training = sport.hasWallball ? "Training, wall ball, combine results"
+                : sport.hasPractice ? "Training, shooting and stickhandling, testing" : "Training, testing"
             return "\(training) and events, including reflections. Not mental sessions, mental-game documents, height and weight, the budget, or other sports."
         case .mental:
             return "Training, events and the mental game: mental sessions and shared documents. Not height and weight, the budget, or other sports."
@@ -73,7 +74,8 @@ public struct CoachRoster: Identifiable, Equatable, Sendable {
     }
 }
 
-/// An athlete as their coach sees them: recent weeks of training and wall ball, recent and upcoming events and, for a
+/// An athlete as their coach sees them: recent weeks of training and home practice (wall ball, or hockey's shooting and
+/// stickhandling), recent and upcoming events and, for a
 /// mental coach, the mental game. Read from the cloud each time; never saved on the coach's phone.
 public struct CoachAthlete: Identifiable, Equatable, Sendable {
     public var data: AppData
@@ -96,6 +98,8 @@ public struct CoachWeek: Equatable, Sendable {
         case highLoad
         /// One hand under 40% of the one-handed wall ball reps this week.
         case laggingHand(WallballHand)
+        /// Hockey: backhand under 15% of the week's shots.
+        case backhandBehind
         /// No training logged for this many days.
         case quiet(days: Int)
 
@@ -103,6 +107,7 @@ public struct CoachWeek: Equatable, Sendable {
             switch self {
             case .highLoad: return "Load spike"
             case .laggingHand(let hand): return "\(hand == .left ? "Left" : "Right") hand behind"
+            case .backhandBehind: return "Backhand behind"
             case .quiet(let days): return "Nothing logged in \(days) days"
             }
         }
@@ -115,6 +120,11 @@ public struct CoachWeek: Equatable, Sendable {
     public var loadRatio: Double?
     public var wallball: HandReps
     public var wallballStreak: Int
+    /// Hockey practice this week: shots, minutes and reps.
+    public var practice: PracticeTotals
+    /// Hockey: stickhandling minutes this week.
+    public var stickhandlingMinutes: Int
+    public var practiceStreak: Int
     public var nextEvent: SeasonEvent?
     public var lastResult: SeasonEvent?
     public var flags: [Flag]
@@ -136,12 +146,18 @@ public struct CoachWeek: Equatable, Sendable {
         let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? now
         wallball = WallballStats.reps(WallballStats.sessions(data.wallballSessions, from: weekStart, to: weekEnd))
         wallballStreak = WallballStats.streak(data.wallballSessions, today: now, calendar: calendar)
+        let library = data.practiceLibrary
+        let weekPractice = PracticeStats.sessions(data.practiceSessions, from: weekStart, to: weekEnd)
+        practice = PracticeStats.totals(weekPractice, library: library)
+        stickhandlingMinutes = PracticeStats.byKind(weekPractice, library: library)[.stickhandling]?.wholeMinutes ?? 0
+        practiceStreak = PracticeStats.streak(data.practiceSessions, today: now, calendar: calendar)
         nextEvent = Season.upcoming(data.events, from: now).first
         lastResult = Season.results(data.events).first
 
         var flags: [Flag] = []
         if loadRatio.map({ $0 > Workload.cautionUpper }) == true { flags.append(.highLoad) }
         if let hand = WallballStats.laggingHand(wallball) { flags.append(.laggingHand(hand)) }
+        if PracticeStats.backhandBehind(PracticeStats.byDrill(weekPractice, library: library)) { flags.append(.backhandBehind) }
         let lastSession = data.sessions.filter { $0.date <= now }.map(\.date).max()
         let quietDays = lastSession.map { calendar.dateComponents([.day], from: calendar.startOfDay(for: $0), to: calendar.startOfDay(for: now)).day ?? 0 }
         if let days = quietDays, days >= CoachWeek.quietAfterDays { flags.append(.quiet(days: days)) }

@@ -31,6 +31,8 @@ public struct SyncChanges: Hashable, Sendable {
     public var programBudgets = TableChanges<ProgramBudgetRow, ProgramBudgetRow.Key>()
     public var trips = TableChanges<TripRow, UUID>()
     public var assignmentCompletions = TableChanges<CompletionRow, CompletionRow.Key>()
+    public var practiceDrills = TableChanges<PracticeDrillRow, String>()
+    public var practiceSessions = TableChanges<PracticeBundle, UUID>()
 
     public init(profileID: UUID) {
         self.profileID = profileID
@@ -39,7 +41,7 @@ public struct SyncChanges: Hashable, Sendable {
     public var isEmpty: Bool {
         profile == nil && programs.isEmpty && sessions.isEmpty && combineResults.isEmpty && events.isEmpty && expenses.isEmpty && docs.isEmpty
             && bodyMeasurements.isEmpty && wallballDrills.isEmpty && wallballSessions.isEmpty && seasonBudgets.isEmpty && programBudgets.isEmpty
-            && trips.isEmpty && assignmentCompletions.isEmpty
+            && trips.isEmpty && assignmentCompletions.isEmpty && practiceDrills.isEmpty && practiceSessions.isEmpty
     }
 }
 
@@ -81,6 +83,8 @@ public enum ProfileMerge {
             changes.programBudgets.upserts = local.programBudgets
             changes.trips.upserts = local.trips
             changes.assignmentCompletions.upserts = local.assignmentCompletions
+            changes.practiceDrills.upserts = local.practiceDrills
+            changes.practiceSessions.upserts = local.practiceSessions
             return Outcome(merged: local, changes: changes)
         }
 
@@ -160,12 +164,17 @@ public enum ProfileMerge {
         let completions = rows(base: base?.assignmentCompletions ?? [], local: local.assignmentCompletions, remote: remote.assignmentCompletions,
                                key: \.key)
         changes.assignmentCompletions = TableChanges(upserts: completions.upserts, deletes: completions.deletes)
+        let practiceDrills = rows(base: base?.practiceDrills ?? [], local: local.practiceDrills, remote: remote.practiceDrills, key: \.id)
+        changes.practiceDrills = TableChanges(upserts: practiceDrills.upserts, deletes: practiceDrills.deletes)
+        let practice = rows(base: base?.practiceSessions ?? [], local: local.practiceSessions, remote: remote.practiceSessions, key: \.id)
+        changes.practiceSessions = TableChanges(upserts: practice.upserts, deletes: practice.deletes)
 
         var merged = ProfileSnapshot(profile: mergedProfile, programs: programs.merged, sessions: sessions.merged,
                                      combineResults: combine.merged, events: events.merged, expenses: expenses.merged, docs: docs.merged,
                                      bodyMeasurements: body.merged, wallballDrills: drills.merged, wallballSessions: wallball.merged,
                                      seasonBudgets: seasonBudgets.merged, programBudgets: programBudgets.merged, trips: trips.merged,
-                                     assignmentCompletions: completions.merged)
+                                     assignmentCompletions: completions.merged, practiceDrills: practiceDrills.merged,
+                                     practiceSessions: practice.merged)
         dropTripLinksToDeletedRows(&merged, &changes)
         return Outcome(merged: merged, changes: changes)
     }
@@ -249,6 +258,8 @@ extension ProfileSnapshot {
             copy.wallballDrills = other?.wallballDrills ?? []
             copy.wallballSessions = other?.wallballSessions ?? []
             copy.assignmentCompletions = other?.assignmentCompletions ?? []
+            copy.practiceDrills = other?.practiceDrills ?? []
+            copy.practiceSessions = other?.practiceSessions ?? []
         case .events:
             copy.events = other?.events ?? []
         case .health:
@@ -277,6 +288,8 @@ extension SyncChanges {
             wallballDrills = .init()
             wallballSessions = .init()
             assignmentCompletions = .init()
+            practiceDrills = .init()
+            practiceSessions = .init()
         case .events:
             events = .init()
         case .health:

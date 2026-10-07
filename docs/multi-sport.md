@@ -1,7 +1,8 @@
 # SportsPocket: hockey alongside lacrosse
 
 Design for making the app work for more than one sport, starting with hockey. Status: **design, with the review
-decisions of 2026-10-06**. The rename, the new logo and phase 1 (sport profiles) are built; phases 2–4 aren't yet.
+decisions of 2026-10-06**. The rename, the new logo, phase 1 (sport profiles) and phase 2 (hockey practice) are built; phases 3 and 4
+aren't yet.
 
 ## Decisions
 
@@ -101,22 +102,25 @@ public struct AthleteProfile {
   switching on it themselves.
 - `ProfileSummary` gains `sport` and `athleteID` so the switcher can group without loading every profile.
 - `AppData.addingSport(_:)` makes the new sport profile for the same athlete, copying only the fields listed above.
-- New hockey data on `AppData`: `practiceDrills`, `practiceSessions`, `practiceGoals`, and `SeasonEvent.hockeyStats`.
+- New hockey data on `AppData`: `practiceDrills` and `practiceSessions` (phase 2), the weekly shot and stickhandling
+  goals on the profile, and `SeasonEvent.hockeyStats` (phase 3).
   A lacrosse profile never has them; a hockey profile never has wall ball or an NDTP group.
 - No schema version bump is needed: every new field has a default when it's missing.
 
 ## Hockey home practice
 
-Wall ball counts reps by hand. Hockey practice counts **shots, reps or minutes**, with no hands, and shooting drills can
-also count how many were on target. Hockey uses a general **practice** model that a later sport (basketball makes and
+Built in phase 2 (`Practice.swift`, `LaxPocket/Features/Practice/`, `20261011000000_hockey_practice.sql`).
+
+Wall ball counts reps by hand. Hockey practice counts **shots, minutes or reps**, with no hands, and shooting drills can
+also count how many shots were on target. It's a general **practice** model that a later sport (basketball makes and
 attempts, soccer touches) can reuse; wall ball stays as it is.
 
 ```swift
 public enum PracticeKind: String { case shooting, stickhandling, passing, other }
-public enum PracticeMeasure: String { case shots, reps, minutes }
+public enum PracticeMeasure: String { case shots, minutes, reps }
 
 public struct PracticeDrill {          // built-in from PracticeCatalog for the profile's sport, or the athlete's own
-    var id: String; var kind: PracticeKind; var name: String; var detail: String
+    var id: String; var name: String; var detail: String; var kind: PracticeKind
     var measure: PracticeMeasure; var tracksTarget: Bool; var defaultAmount: Int; var isHidden: Bool
 }
 public struct PracticeSet { var drillID: String; var amount: Int; var onTarget: Int? }
@@ -124,14 +128,16 @@ public struct PracticeSession {         // a day's practice, or a timed challeng
     var id: UUID; var date: Date; var sets: [PracticeSet]
     var minutes: Int?; var challengeSeconds: Int?; var notes: String
 }
-public struct PracticeGoal {            // "1,000 shots a week", set by the athlete
-    var measure: PracticeMeasure; var perWeek: Int
-}
+// On the hockey profile: weeklyShotGoal (1,000 to start) and weeklyStickhandlingGoal (60 minutes); 0 for no goal.
 ```
 
-`PracticeStats` gives today, the week, days and weeks for charts, the streak, best day, totals by drill and kind,
-accuracy, and this week's progress toward the weekly goal with pace. Streak, days, weeks and best day move into a small generic helper that wall
-ball uses too. `PracticeDraft` and `PracticeChallenge` mirror `WallballDraft` and `WallballChallenge` without hands.
+- `PracticeStats` gives totals by kind and drill, days and weeks for charts, the streak, the best shot day, accuracy,
+  the backhand share, pace toward the weekly goals, and challenge bests. Wall ball and practice count streaks with the
+  same `DailyStreak`.
+- A drill's measure decides what it adds to: shots (and on target) toward the shot goal, minutes on stickhandling
+  drills toward the stickhandling goal, reps for passing. Once something is logged with a drill, its measure is fixed.
+- In a timed challenge the count is what was done in the time (touches, shots, passes). Shots count as shots; a
+  stickhandling round adds its time on the clock to the minutes, not its touches.
 
 ### Built-in hockey drills
 
@@ -145,28 +151,23 @@ As with wall ball, the athlete can rename, hide or change defaults and add their
 
 ### Screens (`LaxPocket/Features/Practice/`)
 
-- **Practice card** on Training: shots today, the streak, and the week's shots against the weekly goal as a ring.
-- **Dashboard**: today and the week; streak and best day; shots per day or week stacked by shot type; shot mix and
-  accuracy by shot type; stickhandling minutes; the week's shots against the goal with pace ("on pace for 1,150 by Sunday"); the log.
-- **Log practice**: pick drills, **Pick all** with one number, **Same as last time**, an optional on-target count per
-  shooting drill.
-- **Timed challenge**: stickhandling touches in 30 s, shots on target in 60 s; bests per drill and length.
-- **Shot goal**: shots per week, 1,000 to start; the athlete sets their own.
+- **Practice card** on Training: shots today, the streak, and the week against both goals.
+- **Dashboard**: the week against the shot and stickhandling goals with pace ("on pace for 1,150 by Sunday"); shots
+  and stickhandling today, the streak and the most shots in a day; shots (on target solid, the rest faded) or
+  stickhandling minutes per day or week; shooting, stickhandling and passing by drill, with accuracy and the backhand
+  share; challenge bests; the log.
+- **Log practice**: drills by kind, quick amounts that pick a kind's drills or set them all, **Same as last time**,
+  and an optional on-target count per shooting drill.
+- **Drills**: change, hide, reset or add drills, by kind.
+- **Timed challenge**: touches, shots or passes in 30 s to 2 min per drill, with tap-to-count and bests.
+- **Weekly goals**: shots and stickhandling minutes, set by the athlete.
 
-Where lacrosse warns about a lagging hand, hockey warns about the **shot mix**: backhand under 15% of the week's shots.
+Where lacrosse warns about a lagging hand, hockey warns about the **shot mix**: backhand under 15% of 50 or more
+shots. Coaches see it as a "Backhand behind" flag, with the week's shots and stickhandling minutes.
 
-```
-┌─────────────────────────────────────┐
-│ Shooting & stickhandling       ⚙  + │
-│ Today 120 shots · 15 min   🔥 6 days │
-│ This week       640 / 1,000 shots   │
-│ ▇▇▇▇▇▇▇▇▇▁▁▁▁▁▁▁  on pace for 1,150 │
-├─────────────────────────────────────┤
-│ Shots per day   ▂▅▇▃▆█▅  by type    │
-│ Wrist 52% · Snap 21% · Backhand 9% ⚠ │
-│ On target 64% (wrist 71%, bh 40%)   │
-└─────────────────────────────────────┘
-```
+**Coach tasks** for hockey rosters: **Shots** (e.g. 1,000 a week) and **Stickhandling minutes**, which tick themselves
+off from the practice log, alongside training minutes and tick-off tasks. Wall ball tasks are only for lacrosse
+rosters; the database checks a task's kind against the roster's sport.
 
 ## Hockey games
 
@@ -285,7 +286,7 @@ coach members. The app calls it right after the new sport profile's first upload
 recreated so a parent or athlete invite adds the person to every profile with that athlete key. Mental coach trust
 (`mental_coach_trust`) stays per sport profile.
 
-Later phases add `practice_drills`, `practice_sessions`, `practice_sets` and `practice_goals` (phase 2), and
+Later phases add `practice_drills`, `practice_sessions`, `practice_sets` and the profile's two weekly goals (phase 2), and
 `hockey_game_stats` and `season_events.decided_in` (phase 3). They're shaped like the wall ball and `game_stats`
 tables, with `(id, profile_id)` foreign keys, and use the training and events sections. Phase 4 widens the
 `combine_measurements.metric` check.
@@ -336,11 +337,14 @@ didn't, the next sync would replace it with the cloud's copy.
    focus tags and profile fields; a hockey profile hides wall ball and NDTP, and its games take a score but no stat
    sheet yet; roster sport and matching on join; phase 1 migration. After this, a hockey athlete can use everything
    except hockey practice, stats and testing.
-2. **Hockey practice.** Practice model and catalog, dashboard, log, drills, timed challenge, shot goal; the shared
-   streak helper; coaches see hockey practice; practice migration.
+2. **Hockey practice.** Done (`20261011000000_hockey_practice.sql`). Practice model and catalog, dashboard, log, drills,
+   timed challenge, weekly shot and stickhandling goals; the shared streak helper; coaches see hockey practice; shots
+   and stickhandling coach tasks.
 3. **Hockey games.** Skater and goalie stat sheets, W–L–T–OTL; hockey stats migration.
-4. **Testing and finish.** NHL Combine tests and `NHLCombineStandards` from the 2026 release; a made-up demo hockey
-   profile for Maya, so switching can be demoed; README.
+4. **Testing and finish.** NHL Combine tests and `NHLCombineStandards` from the 2026 release; README. The made-up demo
+   hockey profile for Maya is done (`DemoHockey.swift`): her own teams, season, budget, mental-game docs and practice,
+   with a hockey team roster and a hockey mental-game roster to preview coaching. Give it combine results with the
+   standards.
 
 ### Tests per phase
 

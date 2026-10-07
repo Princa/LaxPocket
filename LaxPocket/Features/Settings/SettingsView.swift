@@ -92,18 +92,26 @@ struct SettingsView: View {
                         cloud.loadDemo(viewer: nil)
                         dismiss()
                     }
+                    Button("Load demo athlete in hockey") {
+                        cloud.loadDemo(viewer: nil, sport: .hockey)
+                        dismiss()
+                    }
                     Menu("View as…") {
-                        ForEach(Relationship.allCases) { viewer in
-                            Button(viewer.demoTitle) {
-                                cloud.loadDemo(viewer: viewer)
-                                dismiss()
+                        ForEach(Sport.allCases) { sport in
+                            Section(sport.title) {
+                                ForEach(Relationship.allCases) { viewer in
+                                    Button(viewer.demoTitle) {
+                                        cloud.loadDemo(viewer: viewer, sport: sport)
+                                        dismiss()
+                                    }
+                                }
                             }
                         }
                     }
                 } header: {
                     Text("Demo data")
                 } footer: {
-                    Text("Debug builds only. Adds Maya, a made-up athlete with a full season around today, or rebuilds her if she’s already here. She stays on this iPhone and isn’t synced. View as shows her the way a parent, her own login or a coach would see her in the cloud; a coach also gets Coaching with a made-up roster. Nothing in the preview is saved to the cloud.")
+                    Text("Debug builds only. Adds Maya, a made-up athlete who plays lacrosse and hockey, with a full season of each around today, or rebuilds her if she’s already here; switch sports with the sport button at the top of Home. She stays on this iPhone and isn’t synced. View as shows her in either sport the way a parent, her own login or a coach would see her in the cloud; a coach or mental coach also gets Coaching with a made-up roster for that sport. Nothing in the preview is saved to the cloud.")
                 }
                 #endif
             }

@@ -19,7 +19,7 @@ public struct ProfileRow: CloudRow {
     public static let table = "profiles"
     public static let columns = ["id", "first_name", "class_year", "positions", "benchmark_group", "mental_coach_name",
                                  "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units", "usd_to_cad",
-                                 "sport", "athlete_id", "shoots", "plays_goal", "level"]
+                                 "sport", "athlete_id", "shoots", "plays_goal", "level", "weekly_shot_goal", "weekly_stickhandling_goal"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -41,6 +41,8 @@ public struct ProfileRow: CloudRow {
     public var shoots: Handedness?
     public var playsGoal: Bool = false
     public var level: String = ""
+    public var weeklyShotGoal: Int = AthleteProfile.defaultWeeklyShotGoal
+    public var weeklyStickhandlingGoal: Int = AthleteProfile.defaultWeeklyStickhandlingGoal
 
     enum CodingKeys: String, CodingKey {
         case id, positions, sport, shoots, level
@@ -48,6 +50,7 @@ public struct ProfileRow: CloudRow {
         case mentalCoachName = "mental_coach_name", weeklyGoalHours = "weekly_goal_hours", seasonLabel = "season_label"
         case seasonBudget = "season_budget", themeID = "theme_id", bodyUnits = "body_units", usdToCAD = "usd_to_cad"
         case athleteID = "athlete_id", playsGoal = "plays_goal"
+        case weeklyShotGoal = "weekly_shot_goal", weeklyStickhandlingGoal = "weekly_stickhandling_goal"
     }
 }
 
@@ -73,6 +76,9 @@ extension ProfileRow {
         shoots = try c.decodeIfPresent(Handedness.self, forKey: .shoots)
         playsGoal = try c.decodeIfPresent(Bool.self, forKey: .playsGoal) ?? false
         level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
+        weeklyShotGoal = try c.decodeIfPresent(Int.self, forKey: .weeklyShotGoal) ?? AthleteProfile.defaultWeeklyShotGoal
+        weeklyStickhandlingGoal = try c.decodeIfPresent(Int.self, forKey: .weeklyStickhandlingGoal)
+            ?? AthleteProfile.defaultWeeklyStickhandlingGoal
     }
 
     /// The same for every sport profile of one athlete.
@@ -629,6 +635,64 @@ public struct WallballSetRow: CloudRow {
     }
 }
 
+public struct PracticeDrillRow: CloudRow {
+    public static let table = "practice_drills"
+    public static let columns = ["profile_id", "id", "kind", "name", "detail", "measure", "tracks_target", "default_amount", "hidden", "sort_order"]
+    public static let conflictColumns = ["profile_id", "id"]
+
+    public var profileID: UUID
+    public var id: String
+    public var kind: PracticeKind
+    public var name: String
+    public var detail: String
+    public var measure: PracticeMeasure
+    public var tracksTarget: Bool
+    public var defaultAmount: Int
+    public var hidden: Bool
+    public var sortOrder: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, name, detail, measure, hidden
+        case profileID = "profile_id", tracksTarget = "tracks_target", defaultAmount = "default_amount", sortOrder = "sort_order"
+    }
+}
+
+public struct PracticeSessionRow: CloudRow {
+    public static let table = "practice_sessions"
+    public static let columns = ["id", "profile_id", "done_at", "minutes", "challenge_seconds", "notes"]
+    public static let conflictColumns = ["id"]
+
+    public var id: UUID
+    public var profileID: UUID
+    public var doneAt: Timestamp
+    public var minutes: Int?
+    public var challengeSeconds: Int?
+    public var notes: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, minutes, notes
+        case profileID = "profile_id", doneAt = "done_at", challengeSeconds = "challenge_seconds"
+    }
+}
+
+public struct PracticeSetRow: CloudRow {
+    public static let table = "practice_sets"
+    public static let columns = ["session_id", "profile_id", "drill_id", "amount", "on_target", "position"]
+    public static let conflictColumns = ["session_id", "drill_id"]
+
+    public var sessionID: UUID
+    public var profileID: UUID
+    public var drillID: String
+    public var amount: Int
+    public var onTarget: Int?
+    public var position: Int
+
+    enum CodingKeys: String, CodingKey {
+        case amount, position
+        case sessionID = "session_id", profileID = "profile_id", drillID = "drill_id", onTarget = "on_target"
+    }
+}
+
 // MARK: - Groups that sync as one unit
 
 /// A testing day with its results. Changing any result re-sends the whole day.
@@ -662,6 +726,15 @@ public struct WallballBundle: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID { session.id }
 }
 
+/// A practice session with its sets. Changing any set re-sends the whole session.
+public struct PracticeBundle: Codable, Hashable, Identifiable, Sendable {
+    public var session: PracticeSessionRow
+    /// In `position` order.
+    public var sets: [PracticeSetRow]
+
+    public var id: UUID { session.id }
+}
+
 /// Everything stored for one athlete profile, as cloud rows.
 public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var profile: ProfileRow
@@ -687,12 +760,15 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
     public var assignmentCompletions: [CompletionRow]
     /// Coaches' notes on games. Read only.
     public var coachNotes: [AthleteCoachNoteRow]
+    public var practiceDrills: [PracticeDrillRow]
+    public var practiceSessions: [PracticeBundle]
 
     public init(profile: ProfileRow, programs: [ProgramRow] = [], sessions: [SessionRow] = [], combineResults: [CombineBundle] = [],
                 events: [EventBundle] = [], expenses: [ExpenseRow] = [], docs: [MentalDocRow] = [], bodyMeasurements: [BodyMeasurementRow] = [],
                 wallballDrills: [WallballDrillRow] = [], wallballSessions: [WallballBundle] = [], seasonBudgets: [SeasonBudgetRow] = [],
                 programBudgets: [ProgramBudgetRow] = [], trips: [TripRow] = [], lockedDocs: [LockedMentalDocRow] = [], access: ProfileAccess? = nil,
-                assignments: [AthleteAssignmentRow] = [], assignmentCompletions: [CompletionRow] = [], coachNotes: [AthleteCoachNoteRow] = []) {
+                assignments: [AthleteAssignmentRow] = [], assignmentCompletions: [CompletionRow] = [], coachNotes: [AthleteCoachNoteRow] = [],
+                practiceDrills: [PracticeDrillRow] = [], practiceSessions: [PracticeBundle] = []) {
         self.profile = profile
         self.programs = programs
         self.sessions = sessions
@@ -711,17 +787,21 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         self.assignments = assignments
         self.assignmentCompletions = assignmentCompletions
         self.coachNotes = coachNotes
+        self.practiceDrills = practiceDrills
+        self.practiceSessions = practiceSessions
     }
 
     private enum CodingKeys: String, CodingKey {
         case profile, programs, sessions, combineResults, events, expenses, docs, bodyMeasurements, wallballDrills, wallballSessions,
-             seasonBudgets, programBudgets, trips, lockedDocs, access, assignments, assignmentCompletions, coachNotes
+             seasonBudgets, programBudgets, trips, lockedDocs, access, assignments, assignmentCompletions, coachNotes,
+             practiceDrills, practiceSessions
     }
 
     /// Sync records saved before height and weight tracking have no `bodyMeasurements`, those saved before
     /// wall ball have no `wallballDrills` or `wallballSessions`, those saved before budgets per season have
-    /// no `seasonBudgets` or `programBudgets`, those saved before trips have no `trips`, and those saved before family
-    /// accounts have no `lockedDocs` or `access`.
+    /// no `seasonBudgets` or `programBudgets`, those saved before trips have no `trips`, those saved before family
+    /// accounts have no `lockedDocs` or `access`, and those saved before hockey practice have no `practiceDrills` or
+    /// `practiceSessions`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfileRow.self, forKey: .profile)
@@ -742,6 +822,8 @@ public struct ProfileSnapshot: Codable, Hashable, Sendable {
         assignments = try c.decodeIfPresent([AthleteAssignmentRow].self, forKey: .assignments) ?? []
         assignmentCompletions = try c.decodeIfPresent([CompletionRow].self, forKey: .assignmentCompletions) ?? []
         coachNotes = try c.decodeIfPresent([AthleteCoachNoteRow].self, forKey: .coachNotes) ?? []
+        practiceDrills = try c.decodeIfPresent([PracticeDrillRow].self, forKey: .practiceDrills) ?? []
+        practiceSessions = try c.decodeIfPresent([PracticeBundle].self, forKey: .practiceSessions) ?? []
     }
 }
 
@@ -773,6 +855,9 @@ extension ProfileRow {
         shoots = p.sport == .hockey ? p.shoots : nil
         playsGoal = p.sport == .hockey && p.playsGoal
         level = String(p.level.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ProfileRow.levelLength))
+        weeklyShotGoal = min(max(p.weeklyShotGoal, AthleteProfile.weeklyShotGoalRange.lowerBound), AthleteProfile.weeklyShotGoalRange.upperBound)
+        weeklyStickhandlingGoal = min(max(p.weeklyStickhandlingGoal, AthleteProfile.weeklyStickhandlingGoalRange.lowerBound),
+                                      AthleteProfile.weeklyStickhandlingGoalRange.upperBound)
     }
 
     /// Longest level the database takes.
@@ -811,6 +896,30 @@ extension WallballBundle {
                                      challengeSeconds: seconds, notes: s.notes)
         sets = WallballSession.normalized(s.sets).enumerated().map { index, set in
             WallballSetRow(sessionID: s.id, profileID: profileID, drillID: set.drillID, hand: set.hand, reps: set.reps, position: index)
+        }
+    }
+}
+
+extension PracticeDrillRow {
+    /// Kept to what the database accepts: a name, and a default amount in range.
+    init(_ d: PracticeDrill, profileID: UUID, sortOrder: Int) {
+        let name = d.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = PracticeDrill.defaultAmountRange
+        self.init(profileID: profileID, id: d.id, kind: d.kind, name: name.isEmpty ? "Drill" : name, detail: d.detail, measure: d.measure,
+                  tracksTarget: d.tracksTarget && d.measure == .shots, defaultAmount: min(max(d.defaultAmount, range.lowerBound), range.upperBound),
+                  hidden: d.isHidden, sortOrder: sortOrder)
+    }
+}
+
+extension PracticeBundle {
+    /// One set per drill, with amounts in range. A time or challenge length the database wouldn't take is left out.
+    init(_ s: PracticeSession, profileID: UUID) {
+        let minutes = s.minutes.flatMap { (1...1440).contains($0) ? $0 : nil }
+        let seconds = s.challengeSeconds.flatMap { PracticeChallenge.secondsRange.contains($0) ? $0 : nil }
+        session = PracticeSessionRow(id: s.id, profileID: profileID, doneAt: Timestamp(s.date), minutes: minutes,
+                                     challengeSeconds: seconds, notes: s.notes)
+        sets = PracticeSession.normalized(s.sets).enumerated().map { index, set in
+            PracticeSetRow(sessionID: s.id, profileID: profileID, drillID: set.drillID, amount: set.amount, onTarget: set.onTarget, position: index)
         }
     }
 }
@@ -917,6 +1026,8 @@ extension ProfileSnapshot {
         bodyMeasurements = data.bodyMeasurements.compactMap { BodyMeasurementRow($0, profileID: pid) }
         wallballDrills = data.wallballDrills.enumerated().map { WallballDrillRow($1, profileID: pid, sortOrder: $0) }
         wallballSessions = data.wallballSessions.map { WallballBundle($0, profileID: pid) }
+        practiceDrills = data.practiceDrills.enumerated().map { PracticeDrillRow($1, profileID: pid, sortOrder: $0) }
+        practiceSessions = data.practiceSessions.map { PracticeBundle($0, profileID: pid) }
     }
 
     // MARK: - Rows → app data
@@ -927,7 +1038,8 @@ extension ProfileSnapshot {
         let athlete = AthleteProfile(firstName: p.firstName, classYear: p.classYear, positions: p.positions, benchmarkGroup: p.benchmarkGroup,
                                      mentalCoachName: p.mentalCoachName, weeklyGoalHours: p.weeklyGoalHours, season: p.seasonLabel,
                                      bodyUnits: p.bodyUnits, usdToCAD: p.usdToCAD, sport: p.sport, athleteID: p.athleteID,
-                                     shoots: p.shoots, playsGoal: p.playsGoal, level: p.level)
+                                     shoots: p.shoots, playsGoal: p.playsGoal, level: p.level, weeklyShotGoal: p.weeklyShotGoal,
+                                     weeklyStickhandlingGoal: p.weeklyStickhandlingGoal)
         return AppData(
             id: p.id,
             profile: athlete,
@@ -986,7 +1098,18 @@ extension ProfileSnapshot {
             assignments: assignments.map(\.assignment).sorted { ($0.startsOn, $0.title) < ($1.startsOn, $1.title) },
             assignmentCompletions: assignmentCompletions.sorted { ($0.periodStart, $0.assignmentID.uuidString) < ($1.periodStart, $1.assignmentID.uuidString) }
                 .map { AssignmentCompletion(assignmentID: $0.assignmentID, periodStart: $0.periodStart) },
-            coachNotes: coachNotes.map(\.coachNote)
+            coachNotes: coachNotes.map(\.coachNote),
+            practiceDrills: practiceDrills.sorted { ($0.sortOrder, $0.id) < ($1.sortOrder, $1.id) }.map { r in
+                PracticeDrill(id: r.id, name: r.name, detail: r.detail, kind: r.kind, measure: r.measure, tracksTarget: r.tracksTarget,
+                              defaultAmount: r.defaultAmount, isHidden: r.hidden)
+            },
+            practiceSessions: practiceSessions.sorted { $0.session.doneAt < $1.session.doneAt }.map { b in
+                PracticeSession(id: b.session.id, date: b.session.doneAt.date,
+                                sets: b.sets.sorted { $0.position < $1.position }.map {
+                                    PracticeSet(drillID: $0.drillID, amount: $0.amount, onTarget: $0.onTarget)
+                                },
+                                minutes: b.session.minutes, challengeSeconds: b.session.challengeSeconds, notes: b.session.notes)
+            }
         )
     }
 }
@@ -1033,6 +1156,7 @@ extension ProfileSnapshot {
             && Set(trips) == Set(other.trips) && Set(lockedDocs) == Set(other.lockedDocs) && access == other.access
             && Set(assignments) == Set(other.assignments) && Set(assignmentCompletions) == Set(other.assignmentCompletions)
             && Set(coachNotes) == Set(other.coachNotes)
+            && Set(practiceDrills) == Set(other.practiceDrills) && Set(practiceSessions) == Set(other.practiceSessions)
     }
 }
 
@@ -1226,8 +1350,8 @@ public struct AssignmentRow: CloudRow {
         startsOn = a.startsOn
         dueOn = a.schedule == .once ? max(a.dueOn ?? a.startsOn, a.startsOn) : nil
         endsOn = a.schedule == .once ? nil : a.endsOn.map { max($0, a.startsOn) }
-        targetReps = a.kind == .wallball ? min(max(a.targetReps ?? 100, 1), 10_000) : nil
-        targetMinutes = a.kind == .training ? min(max(a.targetMinutes ?? 60, 1), 10_080) : nil
+        targetReps = a.kind.countsReps ? min(max(a.targetReps ?? 100, 1), 10_000) : nil
+        targetMinutes = a.kind.countsMinutes ? min(max(a.targetMinutes ?? 60, 1), 10_080) : nil
         category = a.kind == .training ? a.category : nil
     }
 

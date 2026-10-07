@@ -200,6 +200,12 @@ struct CoachAthleteRow: View {
                 if week.wallball.total > 0 {
                     Pill(text: "Wall ball \(week.wallball.total)", background: AppTheme.background, foreground: AppTheme.muted)
                 }
+                if week.practice.shots > 0 {
+                    Pill(text: "Shots \(week.practice.shots.formatted())", background: AppTheme.background, foreground: AppTheme.muted)
+                }
+                if week.stickhandlingMinutes > 0 {
+                    Pill(text: "Hands \(week.stickhandlingMinutes) min", background: AppTheme.background, foreground: AppTheme.muted)
+                }
                 ForEach(week.flags.filter { $0 != .highLoad }, id: \.self) { flag in
                     Pill(text: flag.title, background: theme.accentTint, foreground: theme.accentText)
                 }
@@ -276,6 +282,23 @@ struct CoachAthleteView: View {
                         ForEach(Array(tasks.enumerated()), id: \.element.id) { index, status in
                             AssignmentStatusRow(status: status, showsCoach: false).padding(.horizontal, 14)
                             if index < tasks.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                        }
+                    }
+                }
+
+                if data.profile.sport.hasPractice {
+                    Card {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Shooting & stickhandling this week").font(.system(size: 15, weight: .semibold))
+                                Text(practiceDetail(week)).font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(week.practice.shots.formatted()).font(.display(28)).foregroundStyle(AppTheme.ink)
+                                Text(week.practiceStreak > 0 ? "shots · \(week.practiceStreak)-day streak" : "shots · no streak")
+                                    .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                            }
                         }
                     }
                 }
@@ -420,6 +443,15 @@ struct CoachAthleteView: View {
             Text("\(data.lockedDocs.count) locked document\(data.lockedDocs.count == 1 ? "" : "s"). \(data.profile.firstName) can let you open them from their own login.")
                 .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
         }
+    }
+
+    /// "64% on target · 45 min stickhandling · 80 passes".
+    private func practiceDetail(_ week: CoachWeek) -> String {
+        var parts: [String] = []
+        if let accuracy = week.practice.accuracy { parts.append("\(Int((accuracy * 100).rounded()))% on target") }
+        parts.append("\(week.stickhandlingMinutes) min stickhandling")
+        if week.practice.reps > 0 { parts.append("\(week.practice.reps) passes and reps") }
+        return parts.joined(separator: " · ")
     }
 }
 
