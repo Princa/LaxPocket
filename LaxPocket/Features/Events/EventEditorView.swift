@@ -97,7 +97,8 @@ struct EventEditorView: View {
                 whenSection
                 if canScore {
                     resultSection
-                    if played { statsSection }
+                    // Hockey's skater and goalie stats come in a later update; its games take a score.
+                    if played && store.sport.hasGameStats { statsSection }
                 }
                 focusSection
                 if canScore && played { reflectionSection }
@@ -205,7 +206,7 @@ struct EventEditorView: View {
         Section {
             ForEach($focus) { $goal in
                 VStack(alignment: .leading, spacing: 8) {
-                    TextField("Goal, e.g. Win 3+ draw controls", text: $goal.text, axis: .vertical)
+                    TextField("Goal, e.g. \(store.sport.goalExample)", text: $goal.text, axis: .vertical)
                     HStack {
                         Picker("Outcome", selection: $goal.outcome) {
                             ForEach(FocusOutcome.allCases, id: \.self) { Text($0 == .pending ? "Not rated" : $0.title).tag($0) }

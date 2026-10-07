@@ -7,6 +7,7 @@ struct AthleteProfileView: View {
     @Environment(\.appTheme) private var theme
     @State private var editingClub: ClubTarget?
     @State private var showLogBody = false
+    @State private var showAddSport = false
 
     /// Which club the editor sheet is for; nil for a new one.
     private struct ClubTarget: Identifiable {
@@ -17,6 +18,7 @@ struct AthleteProfileView: View {
     var body: some View {
         let clubs = store.data.programs.filter { $0.group == .teams }
         let name = store.data.summary.displayName
+        let sport = store.sport
 
         Form {
             Section {
@@ -24,13 +26,18 @@ struct AthleteProfileView: View {
             }
 
             Section("Athlete") {
-                TextField("First name", text: binding(\.profile.firstName))
+                TextField("First name", text: athleteBinding(\.firstName))
                     .textContentType(.givenName)
-                TextField("Class of", value: binding(\.profile.classYear), format: .number.grouping(.never))
+                TextField("Class of", value: athleteBinding(\.classYear), format: .number.grouping(.never))
                     .keyboardType(.numberPad)
-                TextField("Positions, e.g. Midfield / Attack", text: binding(\.profile.positions))
+                TextField(sport.positionsPrompt, text: binding(\.profile.positions))
+                if sport == .hockey {
+                    HockeyFields(shoots: binding(\.profile.shoots), playsGoal: binding(\.profile.playsGoal), level: binding(\.profile.level))
+                }
                 TextField("Mental coach's name", text: binding(\.profile.mentalCoachName))
             }
+
+            sportsSection
 
             Section {
                 ForEach(clubs) { club in
@@ -40,11 +47,14 @@ struct AthleteProfileView: View {
                 Button { editingClub = ClubTarget() } label: {
                     Label("Add a club or team", systemImage: "plus")
                 }
-                NDTPPicker(group: Binding(get: { store.profile.benchmarkGroup }, set: { group in store.update { $0.setNDTPGroup(group) } }))
+                if sport.hasNDTPTesting {
+                    NDTPPicker(group: Binding(get: { store.profile.benchmarkGroup }, set: { group in store.update { $0.setNDTPGroup(group) } }))
+                }
             } header: {
                 Text("Clubs & teams")
             } footer: {
-                Text("Add every team \(name) plays for: club, school, box, provincial. Each one shows up in Log session and when you add a game. Picking an NDTP age group adds NDTP as a team and scores combine results against that group's standards.")
+                Text("Add every \(sport.title.lowercased()) team \(name) plays for: \(sport.teamKinds). Each one shows up in Log session and when you add a game."
+                     + (sport.hasNDTPTesting ? " Picking an NDTP age group adds NDTP as a team and scores combine results against that group's standards." : ""))
             }
 
             if store.data.canRead(.health) {
@@ -73,6 +83,39 @@ struct AthleteProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editingClub) { target in ProgramEditorView(program: target.program, group: .teams) }
         .sheet(isPresented: $showLogBody) { LogMeasurementView(units: store.profile.bodyUnits) }
+        .sheet(isPresented: $showAddSport) { NewProfileView(athlete: store.data) }
+    }
+
+    /// The athlete's sports: switch to another, or add one. Each sport is its own profile.
+    @ViewBuilder
+    private var sportsSection: some View {
+        let sports = store.athleteSports
+        let toAdd = store.sportsToAdd(for: store.data.id)
+        if sports.count > 1 || !toAdd.isEmpty {
+            Section {
+                ForEach(sports) { summary in
+                    Button { store.switchProfile(to: summary.id) } label: {
+                        HStack {
+                            Label(summary.sport.title, systemImage: summary.sport.symbolName)
+                            Spacer()
+                            if summary.id == store.data.id {
+                                Text("Showing").foregroundStyle(AppTheme.muted)
+                            }
+                        }
+                    }
+                    .disabled(summary.id == store.data.id)
+                }
+                if !toAdd.isEmpty {
+                    Button { showAddSport = true } label: {
+                        Label("Add a sport", systemImage: "plus")
+                    }
+                }
+            } header: {
+                Text("Sports")
+            } footer: {
+                Text("Each sport is kept apart: its own training, games, budget, theme and coaches. The name and class year are the same in every sport.")
+            }
+        }
     }
 
     private var header: some View {
@@ -95,6 +138,7 @@ struct AthleteProfileView: View {
         var parts: [String] = []
         if let year = p.classYear { parts.append("Class of \(year)") }
         if !p.positions.isEmpty { parts.append(p.positions) }
+        if !p.level.isEmpty { parts.append(p.level) }
         if let height = BodyTrends.heights(store.data.bodyMeasurements).last { parts.append(p.bodyUnits.formatHeight(height.value)) }
         let teams = store.data.programs.filter { $0.group == .teams }.count
         if teams > 0 { parts.append(teams == 1 ? "1 team" : "\(teams) teams") }
@@ -126,6 +170,14 @@ struct AthleteProfileView: View {
         if games > 0 { parts.append(games == 1 ? "1 game" : "\(games) games") }
         if hours > 0 { parts.append("\(Formatters.hours(hours)) h") }
         return parts.joined(separator: " · ")
+    }
+
+    /// For what's the same in every sport: the name and class year.
+    private func athleteBinding<Value>(_ keyPath: WritableKeyPath<AthleteProfile, Value>) -> Binding<Value> {
+        Binding(
+            get: { store.profile[keyPath: keyPath] },
+            set: { newValue in store.updateAthlete { $0[keyPath: keyPath] = newValue } }
+        )
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppData, Value>) -> Binding<Value> {

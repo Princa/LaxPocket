@@ -1,4 +1,4 @@
-# LaxPocket
+# SportsPocket (LaxPocket in code)
 
 iPhone app (SwiftUI, iOS 17) with its logic in the `LaxPocketCore` Swift package (`Core/`) and an optional Supabase
 backend (`supabase/`). See README.md for what each screen does.
@@ -20,6 +20,17 @@ backend (`supabase/`). See README.md for what each screen does.
     `Config/Signing.xcconfig`, which `configFiles` in `project.yml` points at, so regenerating keeps the team. Never
     put a team ID in `project.yml`, never commit `Local.xcconfig`, and keep `configFiles` as it is.
 - Logic and models go in `Core/Sources/LaxPocketCore` with tests in `Core/Tests`; keep views in `LaxPocket/Features`.
+- The app is going multi-sport (lacrosse and hockey, more later) as planned in `docs/multi-sport.md`. Sports are
+  completely separate: an athlete has one sport profile per sport, their data is never added up across sports, and a
+  coach only sees the one sport their roster is for. The family (parents and the athlete's own login) is the same in
+  every sport: adding a sport brings them along, and only a new person is invited. Update the doc when the plan
+  changes.
+- In the cloud, a profile's `sport` and `athlete_id` never change after it's created. Keeping the family the same
+  across an athlete's sports is done in three functions (sport profiles migration): `add_family_to_sport`,
+  `accept_profile_invite` and `remove_from_athlete`. A change to how members are added or removed goes in all three.
+- The app is called SportsPocket on the phone; the bundle ID (`com.princa.laxpocket`), URL scheme, Xcode project,
+  `LaxPocketCore` and the storage folder keep the LaxPocket name. Never change the bundle ID or the storage folder:
+  phones would lose the athletes saved on them.
 - Check before pushing:
   - `cd Core && swift test`
   - `supabase/tests/run-local.sh` when a migration or `supabase/tests/rls_test.sql` changes (needs a local Postgres)

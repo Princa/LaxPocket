@@ -124,7 +124,7 @@ final class FamilyAccessTests: XCTestCase {
 
     func testPeopleNames() {
         let id = UUID()
-        XCTAssertEqual(ProfilePerson(userID: id, name: " ", access: Self.coach, isMe: false).displayName, "LaxPocket account")
+        XCTAssertEqual(ProfilePerson(userID: id, name: " ", access: Self.coach, isMe: false).displayName, "SportsPocket account")
         XCTAssertEqual(ProfilePerson(userID: id, name: "Sam", access: Self.athlete, isMe: true).displayName, "Sam (you)")
     }
 

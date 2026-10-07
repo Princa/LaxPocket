@@ -144,7 +144,7 @@ struct LogSessionView: View {
         }
     }
 
-    private var focusOptions: [String] { TrainingSession.focusOptions(for: category) }
+    private var focusOptions: [String] { TrainingSession.focusOptions(for: category, athlete: store.profile) }
 
     private var notesPrompt: String {
         category == .mental

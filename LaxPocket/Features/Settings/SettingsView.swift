@@ -8,6 +8,13 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var confirmBlank = false
 
+    /// "1 athlete on this iPhone", or "Hockey · 2 athletes on this iPhone" once there's more than one sport.
+    private var athletesLine: String {
+        let count = store.index.athletes.count
+        let athletes = count == 1 ? "1 athlete on this iPhone" : "\(count) athletes on this iPhone"
+        return Set(store.profiles.map(\.sport)).count > 1 ? "\(store.sport.title) · \(athletes)" : athletes
+    }
+
     var body: some View {
         let theme = AppTheme(palette: store.palette)
         NavigationStack {
@@ -25,7 +32,7 @@ struct SettingsView: View {
                             ProfileAvatar(summary: store.data.summary, size: 32)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(store.data.summary.displayName).font(.system(size: 15, weight: .semibold))
-                                Text(store.profiles.count == 1 ? "1 athlete on this iPhone" : "\(store.profiles.count) athletes on this iPhone")
+                                Text(athletesLine)
                                     .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
                             }
                         }

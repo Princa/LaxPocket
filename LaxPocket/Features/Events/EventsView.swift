@@ -111,12 +111,14 @@ struct EventsView: View {
                 recordNumber(record.losses, "Losses")
                 recordNumber(record.ties, "Ties")
             }
-            Rectangle().fill(Color.white.opacity(0.16)).frame(height: 1)
-            HStack {
-                statNumber(record.totals.goals, "Goals")
-                statNumber(record.totals.assists, "Assists")
-                statNumber(record.totals.groundBalls, "Ground balls")
-                statNumber(record.totals.drawControls, "Draw controls")
+            if store.sport.hasGameStats {
+                Rectangle().fill(Color.white.opacity(0.16)).frame(height: 1)
+                HStack {
+                    statNumber(record.totals.goals, "Goals")
+                    statNumber(record.totals.assists, "Assists")
+                    statNumber(record.totals.groundBalls, "Ground balls")
+                    statNumber(record.totals.drawControls, "Draw controls")
+                }
             }
         }
         .padding(20)

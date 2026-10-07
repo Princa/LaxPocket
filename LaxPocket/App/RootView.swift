@@ -42,9 +42,12 @@ struct RootView: View {
             NavigationStack { TrainingView() }
                 .tabItem { Label("Training", systemImage: "stopwatch") }
                 .tag(AppTab.training)
-            NavigationStack { MetricsView() }
-                .tabItem { Label("Metrics", systemImage: "waveform.path.ecg") }
-                .tag(AppTab.metrics)
+            // Hockey's NHL Combine testing comes in a later update.
+            if store.sport.hasNDTPTesting {
+                NavigationStack { MetricsView() }
+                    .tabItem { Label("Metrics", systemImage: "waveform.path.ecg") }
+                    .tag(AppTab.metrics)
+            }
             NavigationStack { EventsView() }
                 .tabItem { Label("Events", systemImage: "calendar") }
                 .tag(AppTab.events)

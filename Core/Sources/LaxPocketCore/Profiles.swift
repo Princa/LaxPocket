@@ -1,20 +1,47 @@
 import Foundation
 
-/// One athlete in the profile list: enough to show the switcher without loading their data.
+/// One sport profile in the profile list: enough to show the switcher without loading their data.
 public struct ProfileSummary: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
     public var name: String
     public var themeID: String
+    public var sport: Sport
+    /// See `AthleteProfile.athleteID`.
+    public var athleteID: UUID?
 
-    public init(id: UUID, name: String, themeID: String = ThemeCatalog.defaultID) {
+    public init(id: UUID, name: String, themeID: String = ThemeCatalog.defaultID, sport: Sport = .lacrosse, athleteID: UUID? = nil) {
         self.id = id
         self.name = name
         self.themeID = themeID
+        self.sport = sport
+        self.athleteID = athleteID
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, themeID, sport, athleteID
+    }
+
+    /// Lists saved before hockey have no `sport` or `athleteID`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        themeID = try c.decodeIfPresent(String.self, forKey: .themeID) ?? ThemeCatalog.defaultID
+        sport = try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse
+        athleteID = try c.decodeIfPresent(UUID.self, forKey: .athleteID)
+    }
+
+    /// The same for every sport profile of one athlete.
+    public var athleteKey: UUID { athleteID ?? id }
 
     public var displayName: String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? "Unnamed athlete" : trimmed
+    }
+
+    /// "Maya · Hockey", for lists where an athlete's sports sit side by side.
+    public var nameWithSport: String {
+        "\(displayName) · \(sport.title)"
     }
 
     /// First letter of the name for avatar badges.
@@ -35,6 +62,28 @@ public struct ProfileIndex: Codable, Equatable, Sendable {
 
     public var active: ProfileSummary? {
         profiles.first { $0.id == activeProfileID }
+    }
+
+    /// Each athlete's sport profiles, athletes in the order they were added and each one's sports in the same order.
+    public var athletes: [[ProfileSummary]] {
+        var order: [UUID] = []
+        var byAthlete: [UUID: [ProfileSummary]] = [:]
+        for summary in profiles {
+            if byAthlete[summary.athleteKey] == nil { order.append(summary.athleteKey) }
+            byAthlete[summary.athleteKey, default: []].append(summary)
+        }
+        return order.compactMap { byAthlete[$0] }
+    }
+
+    /// Every sport profile of the athlete a profile belongs to, itself included.
+    public func sportProfiles(of id: UUID) -> [ProfileSummary] {
+        guard let key = profiles.first(where: { $0.id == id })?.athleteKey else { return [] }
+        return profiles.filter { $0.athleteKey == key }
+    }
+
+    /// True when the athlete a profile belongs to plays more than one sport on this phone.
+    public func hasOtherSports(_ id: UUID) -> Bool {
+        sportProfiles(of: id).count > 1
     }
 
     /// Replaces the summary with the same ID, or appends it.
