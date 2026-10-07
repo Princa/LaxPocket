@@ -116,16 +116,29 @@ final class AppStore {
     }
 
     #if DEBUG
-    /// Adds the made-up demo athlete (or rebuilds it around today) and switches to it. Debug builds only; the demo
-    /// stays on this device and isn't a local change, so cloud sync never uploads it. With a `viewer`, she looks the
-    /// way she would to that account in the cloud (see `DemoSeason.make(viewer:)`).
-    func loadDemoAthlete(viewer: Relationship? = nil) {
-        let demo = viewer.map { DemoSeason.make(now: now, viewer: $0) } ?? DemoSeason.make(now: now)
-        data = demo
-        index.upsert(demo.summary)
-        index.activeProfileID = demo.id
+    /// Adds the made-up demo athlete in each of her sports (or rebuilds her around today) and switches to her profile
+    /// for `sport`. Debug builds only; the demo stays on this device and isn't a local change, so cloud sync never
+    /// uploads it. With a `viewer`, she looks the way she would to that account in the cloud (see
+    /// `DemoSeason.make(viewer:)`).
+    func loadDemoAthlete(viewer: Relationship? = nil, sport: Sport = .lacrosse) {
+        let profiles = DemoSeason.profiles(now: now, viewer: viewer)
+        // A sport added to her by hand would sit beside the demo's own profile for it.
+        let loaded = Set(profiles.map(\.id))
+        for stale in index.profiles where stale.isDemo && !loaded.contains(stale.id) {
+            try? library.deleteProfile(stale.id)
+            index.remove(stale.id)
+        }
+        for profile in profiles {
+            do {
+                try library.saveProfile(profile)
+            } catch {
+                print("LaxPocket: could not save profile – \(error)")
+            }
+            index.upsert(profile.summary)
+        }
+        data = profiles.first { $0.profile.sport == sport } ?? profiles[0]
+        index.activeProfileID = data.id
         selectedTab = .home
-        saveProfile()
         saveIndex()
     }
     #endif

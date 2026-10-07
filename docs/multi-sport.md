@@ -341,8 +341,10 @@ didn't, the next sync would replace it with the cloud's copy.
    timed challenge, weekly shot and stickhandling goals; the shared streak helper; coaches see hockey practice; shots
    and stickhandling coach tasks.
 3. **Hockey games.** Skater and goalie stat sheets, W–L–T–OTL; hockey stats migration.
-4. **Testing and finish.** NHL Combine tests and `NHLCombineStandards` from the 2026 release; a made-up demo hockey
-   profile for Maya, so switching can be demoed; README.
+4. **Testing and finish.** NHL Combine tests and `NHLCombineStandards` from the 2026 release; README. The made-up demo
+   hockey profile for Maya is done (`DemoHockey.swift`): her own teams, season, budget, mental-game docs and practice,
+   with a hockey team roster and a hockey mental-game roster to preview coaching. Give it combine results with the
+   standards.
 
 ### Tests per phase
 
