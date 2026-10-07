@@ -61,6 +61,16 @@ struct AppTheme {
         }
     }
 
+    /// Hockey practice by kind: shooting in the primary colour, stickhandling in the accent, passing in the third.
+    func color(for kind: PracticeKind) -> Color {
+        switch kind {
+        case .shooting: return primary
+        case .stickhandling: return accent
+        case .passing: return third
+        case .other: return AppTheme.chevron
+        }
+    }
+
     /// Wall ball reps by hand: right in the primary colour, left in the accent, both-hands drills in the third.
     func color(for hand: WallballHand) -> Color {
         switch hand {

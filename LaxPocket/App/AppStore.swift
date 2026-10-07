@@ -404,6 +404,64 @@ final class AppStore {
         update { $0.wallballDrills.removeAll { $0.id == id } }
     }
 
+    /// Adds the practice session, or replaces the one with the same ID.
+    func savePracticeSession(_ session: PracticeSession) {
+        update { data in
+            if let index = data.practiceSessions.firstIndex(where: { $0.id == session.id }) {
+                data.practiceSessions[index] = session
+            } else {
+                data.practiceSessions.append(session)
+            }
+        }
+    }
+
+    func deletePracticeSessions(_ ids: Set<UUID>) {
+        update { $0.practiceSessions.removeAll { ids.contains($0.id) } }
+    }
+
+    /// Saves a practice drill the athlete added or changed. A built-in put back the way it ships isn't stored.
+    func savePracticeDrill(_ drill: PracticeDrill) {
+        update { data in
+            let index = data.practiceDrills.firstIndex { $0.id == drill.id }
+            if PracticeCatalog.builtIn(id: drill.id) == drill {
+                if let index { data.practiceDrills.remove(at: index) }
+            } else if let index {
+                data.practiceDrills[index] = drill
+            } else {
+                data.practiceDrills.append(drill)
+            }
+        }
+    }
+
+    /// True once something is logged with the drill: then it can be hidden but not deleted, and its measure stays.
+    func isPracticeDrillUsed(_ id: String) -> Bool {
+        data.practiceSessions.contains { $0.sets.contains { $0.drillID == id } }
+    }
+
+    /// Only the athlete's own drills with nothing logged can be deleted; the rest can be hidden.
+    func canDeletePracticeDrill(_ id: String) -> Bool {
+        !PracticeCatalog.builtInIDs.contains(id) && !isPracticeDrillUsed(id)
+    }
+
+    func deletePracticeDrill(_ id: String) {
+        guard canDeletePracticeDrill(id) else { return }
+        update { $0.practiceDrills.removeAll { $0.id == id } }
+    }
+
+    /// Puts a built-in practice drill back the way it ships.
+    func resetPracticeDrill(_ id: String) {
+        guard PracticeCatalog.builtInIDs.contains(id) else { return }
+        update { $0.practiceDrills.removeAll { $0.id == id } }
+    }
+
+    /// The athlete's weekly shot and stickhandling goals; 0 for no goal.
+    func setPracticeGoals(shots: Int, stickhandlingMinutes: Int) {
+        update { data in
+            data.profile.weeklyShotGoal = min(max(shots, 0), AthleteProfile.weeklyShotGoalRange.upperBound)
+            data.profile.weeklyStickhandlingGoal = min(max(stickhandlingMinutes, 0), AthleteProfile.weeklyStickhandlingGoalRange.upperBound)
+        }
+    }
+
     func setTheme(_ palette: ThemePalette) {
         update { $0.themeID = palette.id }
         applyAppIcon(for: palette)

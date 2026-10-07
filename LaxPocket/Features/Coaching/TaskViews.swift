@@ -104,7 +104,7 @@ struct AssignmentEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField(roster.sport.hasWallball ? "Title, e.g. Left-hand wall ball" : "Title, e.g. Edge work", text: $title)
+                    TextField(roster.sport.hasWallball ? "Title, e.g. Left-hand wall ball" : "Title, e.g. Backhands every day", text: $title)
                     TextField("Notes for the athlete (optional)", text: $notes, axis: .vertical).lineLimit(2...5)
                     Picker("For", selection: $athleteID) {
                         Text("Everyone on \(roster.name)").tag(UUID?.none)
@@ -119,6 +119,10 @@ struct AssignmentEditorView: View {
                     switch kind {
                     case .wallball:
                         Stepper("\(reps) reps", value: $reps, in: 10...5_000, step: 10)
+                    case .shots:
+                        Stepper("\(reps.formatted()) shots", value: $reps, in: 25...10_000, step: 25)
+                    case .stickhandling:
+                        Stepper(AssignmentStatus.duration(minutes), value: $minutes, in: 5...3_000, step: 5)
                     case .training:
                         Stepper(AssignmentStatus.duration(minutes), value: $minutes, in: 15...3_000, step: 15)
                         Picker("Counts", selection: $category) {
@@ -168,7 +172,14 @@ struct AssignmentEditorView: View {
     }
 
     private func load() {
-        if existing == nil, !AssignmentKind.available(for: roster.sport).contains(kind) { kind = .training }
+        // A new hockey task starts as the weekly 1,000 shots.
+        if existing == nil, !AssignmentKind.available(for: roster.sport).contains(kind) {
+            kind = AssignmentKind.available(for: roster.sport).first ?? .training
+            if kind == .shots {
+                reps = AthleteProfile.defaultWeeklyShotGoal
+                schedule = .weekly
+            }
+        }
         guard let a = existing, title.isEmpty else { return }
         title = a.title
         notes = a.notes
@@ -189,7 +200,7 @@ struct AssignmentEditorView: View {
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
             schedule: schedule, startsOn: DayKey(startsOn), dueOn: schedule == .once ? DayKey(max(dueOn, startsOn)) : nil,
             endsOn: schedule != .once && hasEnd ? DayKey(max(endsOn, startsOn)) : nil,
-            targetReps: kind == .wallball ? reps : nil, targetMinutes: kind == .training ? minutes : nil,
+            targetReps: kind.countsReps ? reps : nil, targetMinutes: kind.countsMinutes ? minutes : nil,
             category: kind == .training ? category : nil)
         isWorking = true
         message = nil
