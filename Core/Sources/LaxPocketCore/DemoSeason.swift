@@ -11,9 +11,24 @@ public enum DemoSeason {
     public static let profileID = UUID(uuidString: "DE300000-0000-4000-8000-00000000DE30")!
 
     public static func make(now: Date = Date(), calendar: Calendar = .laxWeek) -> AppData {
-        var builder = Builder(now: now, calendar: calendar)
+        make(now: now, calendar: calendar, salt: 0)
+    }
+
+    /// `salt` gives a different but still repeatable season, for the made-up teammates on a demo roster.
+    static func make(now: Date, calendar: Calendar, salt: UInt64) -> AppData {
+        var builder = Builder(now: now, calendar: calendar, salt: salt)
         return builder.build()
     }
+}
+
+extension ProfileSummary {
+    /// The demo athlete, in any sport added for them. It stays on this phone and never syncs.
+    public var isDemo: Bool { athleteKey == DemoSeason.profileID }
+}
+
+extension AppData {
+    /// See `ProfileSummary.isDemo`.
+    public var isDemo: Bool { athleteKey == DemoSeason.profileID }
 }
 
 /// SplitMix64: a small seeded generator, so the demo is the same every time for the same day.
@@ -38,12 +53,12 @@ private struct Builder {
     let season: Int
     var rng: SeededGenerator
 
-    init(now: Date, calendar: Calendar) {
+    init(now: Date, calendar: Calendar, salt: UInt64 = 0) {
         self.now = now
         self.calendar = calendar
         today = calendar.startOfDay(for: now)
         season = AthleteProfile.seasonStart(for: now, calendar: calendar)
-        rng = SeededGenerator(seed: UInt64(max(0, today.timeIntervalSince1970)))
+        rng = SeededGenerator(seed: UInt64(max(0, today.timeIntervalSince1970)) &+ salt &* 0x9E37_79B9)
     }
 
     // MARK: - Dates
@@ -387,5 +402,229 @@ private struct Builder {
             }
         }
         return sessions.filter { $0.date <= now }
+    }
+}
+
+// MARK: - Previewing each role
+
+extension DemoSeason {
+    /// Maya as an account with the given relationship would see her once she's in the cloud, to preview each role's
+    /// screens without signing in. A parent owns her and sees a placeholder for the journal she locked; her own login
+    /// can lock docs (the journal is locked, her goals hidden) and only reads the budget. For a coach she's their own
+    /// athlete (a parent who coaches); their rosters come from `coachRosters`.
+    public static func make(now: Date = Date(), calendar: Calendar = .laxWeek, viewer: Relationship) -> AppData {
+        var data = make(now: now, calendar: calendar)
+        switch viewer {
+        case .athlete:
+            data.access = ProfileAccess(role: .editor, relationships: [.athlete])
+            for index in data.docs.indices {
+                switch data.docs[index].folder {
+                case .journal: data.docs[index].visibility = .locked
+                case .goals: data.docs[index].visibility = .hidden
+                default: break
+                }
+            }
+        case .parent, .coach, .mentalCoach:
+            data.access = ProfileAccess(role: .owner, relationships: [.parent])
+            if let journal = data.docs.first(where: { $0.folder == .journal }) {
+                data.docs.removeAll { $0.id == journal.id }
+                data.lockedDocs = [LockedMentalDoc(id: journal.id, folder: journal.folder, updatedAt: journal.updatedAt)]
+            }
+        }
+        // Her coaches' tasks and a note on her last game, as the cloud would send them.
+        data.assignments = (DemoTasks.make(kind: .team, now: now, calendar: calendar) + DemoTasks.make(kind: .mental, now: now, calendar: calendar))
+            .filter { $0.profileID == nil }
+            .map { var task = $0; task.profileID = data.id; return task }
+        if let game = Season.results(data.events).first {
+            data.coachNotes = [CoachNote(eventID: game.id, coachID: DemoTasks.coachID, coachName: DemoTasks.coachName,
+                                         note: "Won 4 of 6 draws and kept your stick up on D. Next: ride the ball carrier to the sideline.",
+                                         updatedAt: game.date.addingTimeInterval(86_400))]
+        }
+        return data
+    }
+
+    /// A made-up roster, read the way a coach reads one from the cloud: a team coach sees training (not mental
+    /// sessions) and events; a mental coach also sees mental sessions and shared docs, one doc an athlete trusted them
+    /// with, and a placeholder for one they didn't. Each athlete shows something to notice: a load spike, a left hand
+    /// falling behind, a quiet week.
+    public static func coachRosters(kind: RosterKind, now: Date = Date(), calendar: Calendar = .laxWeek) -> [CoachRoster] {
+        let since = CoachRoster.since(now: now, calendar: calendar)
+        let eventsSince = calendar.date(byAdding: .day, value: -CoachRoster.recentEventDays, to: now) ?? now
+        let teammates = kind == .team ? DemoTeammate.all : Array(DemoTeammate.all.prefix(3))
+
+        var rows = CoachWorkspace.Rows()
+        for (index, teammate) in teammates.enumerated() {
+            var data = make(now: now, calendar: calendar, salt: UInt64(index + 1))
+            teammate.apply(to: &data, now: now, calendar: calendar)
+            let snapshot = ProfileSnapshot(data)
+            let p = data.profile
+            rows.profiles.append(CoachAthleteProfileRow(id: data.id, firstName: p.firstName, classYear: p.classYear, positions: p.positions,
+                                                        benchmarkGroup: p.benchmarkGroup, weeklyGoalHours: p.weeklyGoalHours, themeID: data.themeID))
+            rows.programs += snapshot.programs
+            rows.sessions += snapshot.sessions.filter { $0.startedAt.date >= since && (kind == .mental || $0.category != .mental) }
+            rows.wallballDrills += snapshot.wallballDrills
+            let wallball = snapshot.wallballSessions.filter { $0.session.doneAt.date >= since }
+            rows.wallballSessions += wallball.map(\.session)
+            rows.wallballSets += wallball.flatMap(\.sets)
+            let events = snapshot.events.filter { $0.event.startsAt.date >= eventsSince }
+            rows.events += events.map(\.event)
+            rows.stats += events.compactMap(\.stats)
+            rows.reflections += events.compactMap(\.reflection)
+            rows.focus += events.flatMap(\.focus)
+            guard kind == .mental else { continue }
+            for doc in snapshot.docs {
+                if doc.folder != .journal {
+                    rows.docs.append(doc)
+                } else if index == 0 {
+                    // Ava let her mental coach open the journal she locked.
+                    var trusted = doc
+                    trusted.visibility = .locked
+                    rows.docs.append(trusted)
+                } else if index == 1 {
+                    // Lily didn't: her mental coach sees that it's there.
+                    rows.lockedDocs.append(LockedMentalDocRow(id: doc.id, profileID: doc.profileID, folder: doc.folder, docUpdatedAt: doc.docUpdatedAt))
+                }
+            }
+        }
+
+        let roster = kind == .team
+            ? RosterRow(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000B1")!, kind: .team, name: "Lakeshore Storm U15", joinCode: "DEMQ4826")
+            : RosterRow(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000B2")!, kind: .mental, name: "Mental-game clients", joinCode: "DEMR7359")
+        let places = rows.profiles.map { RosterAthleteRow(rosterID: roster.id, profileID: $0.id) }
+
+        // Tasks, some already ticked off, and notes on the latest games.
+        let tasks = DemoTasks.make(kind: kind, rosterID: roster.id, athletes: rows.profiles.map(\.id), now: now, calendar: calendar)
+        rows.assignments = tasks.map(AssignmentRow.init)
+        for (index, profile) in rows.profiles.enumerated() {
+            for task in tasks where task.schedule == .once && task.kind == .check && task.isFor(profile.id) && index % 2 == 0 {
+                rows.completions.append(CompletionRow(assignmentID: task.id, profileID: profile.id, periodStart: task.startsOn))
+            }
+            if kind == .team, index < 2, let game = rows.events.filter({ $0.profileID == profile.id && $0.ourScore != nil }).max(by: { $0.startsAt < $1.startsAt }) {
+                rows.coachNotes.append(AthleteCoachNoteRow(eventID: game.id, profileID: profile.id, coachID: DemoTasks.coachID, coachName: DemoTasks.coachName,
+                                                           note: index == 0 ? "Huge effort on the ride. Rest up this week." : "Good slides. Work on your left-hand outlet.",
+                                                           updatedAt: Timestamp(game.startsAt.date.addingTimeInterval(86_400))))
+            }
+        }
+        return CoachWorkspace.assemble(rosters: [roster], places: places, rows: rows)
+    }
+}
+
+/// A made-up teammate of Maya's on a demo roster.
+struct DemoTeammate {
+    enum Pattern {
+        case loadSpike
+        case leftHandBehind
+        case none
+        case quiet
+    }
+
+    var id: UUID
+    var name: String
+    var classYear: Int
+    var positions: String
+    var themeID: String
+    var pattern: Pattern
+
+    static let all = [
+        DemoTeammate(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000A1")!, name: "Ava", classYear: 2031, positions: "Attack",
+                     themeID: "northwestern", pattern: .loadSpike),
+        DemoTeammate(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000A2")!, name: "Lily", classYear: 2030, positions: "Defence",
+                     themeID: "maryland", pattern: .leftHandBehind),
+        DemoTeammate(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000A3")!, name: "Zoe", classYear: 2032, positions: "Midfield",
+                     themeID: "stanford", pattern: .none),
+        DemoTeammate(id: UUID(uuidString: "DE300000-0000-4000-8000-0000000000A4")!, name: "Nora", classYear: 2031, positions: "Goalie",
+                     themeID: "navy", pattern: .quiet)
+    ]
+
+    func apply(to data: inout AppData, now: Date, calendar: Calendar) {
+        data.id = id
+        data.profile.firstName = name
+        data.profile.classYear = classYear
+        data.profile.positions = positions
+        data.themeID = themeID
+        for index in data.docs.indices where data.docs[index].updatedBy == "Maya" { data.docs[index].updatedBy = name }
+
+        let weekStart = Workload.startOfWeek(for: now, calendar: calendar)
+        if pattern != .leftHandBehind {
+            // Maya's left hand trails a little; keep everyone else's this week even, so only Lily is flagged for it.
+            for index in data.wallballSessions.indices where data.wallballSessions[index].date >= weekStart {
+                let rightByDrill = Dictionary(data.wallballSessions[index].sets.filter { $0.hand == .right }.map { ($0.drillID, $0.reps) },
+                                              uniquingKeysWith: +)
+                for setIndex in data.wallballSessions[index].sets.indices where data.wallballSessions[index].sets[setIndex].hand == .left {
+                    data.wallballSessions[index].sets[setIndex].reps = max(1, (rightByDrill[data.wallballSessions[index].sets[setIndex].drillID] ?? 30) - 2)
+                }
+            }
+        }
+        switch pattern {
+        case .loadSpike:
+            // Enough extra team sessions this week to take the load ratio to about 1.7.
+            let weeks = Workload.weeks(endingAt: now, count: 5, sessions: data.sessions, calendar: calendar)
+            let average = weeks.dropLast().map(\.hours.physical).reduce(0, +) / Double(max(weeks.count - 1, 1))
+            let needed = max(0, average * 1.7 - (weeks.last?.hours.physical ?? 0))
+            let count = Int((needed / 2).rounded(.up))
+            let span = now.timeIntervalSince(weekStart)
+            for k in 0..<count {
+                data.sessions.append(TrainingSession(date: weekStart.addingTimeInterval(span * Double(k + 1) / Double(count + 1)),
+                                                     programID: "club", category: .team, minutes: 120, effort: 8, focus: ["Conditioning"],
+                                                     notes: "Extra tournament prep"))
+            }
+        case .leftHandBehind:
+            for index in data.wallballSessions.indices where data.wallballSessions[index].date >= weekStart {
+                let rightByDrill = Dictionary(data.wallballSessions[index].sets.filter { $0.hand == .right }.map { ($0.drillID, $0.reps) },
+                                              uniquingKeysWith: +)
+                for setIndex in data.wallballSessions[index].sets.indices where data.wallballSessions[index].sets[setIndex].hand == .left {
+                    let right = rightByDrill[data.wallballSessions[index].sets[setIndex].drillID] ?? 30
+                    data.wallballSessions[index].sets[setIndex].reps = max(1, right / 6)
+                }
+            }
+        case .quiet:
+            // Nothing this week, and nothing for six days.
+            let cutoff = min(weekStart, now.addingTimeInterval(-6 * 86_400))
+            data.sessions.removeAll { $0.date > cutoff }
+            data.wallballSessions.removeAll { $0.date > cutoff }
+        case .none:
+            break
+        }
+    }
+}
+
+/// Made-up coaches' tasks for the demo.
+enum DemoTasks {
+    static let coachID = UUID(uuidString: "DE300000-0000-4000-8000-0000000000C1")!
+    static let coachName = "Coach Reyes"
+
+    /// A team coach's or mental coach's tasks, started a while ago and running now. `athletes` (in name order) lets
+    /// one task go to a single athlete.
+    static func make(kind: RosterKind, rosterID: UUID? = nil, athletes: [UUID] = [], now: Date, calendar: Calendar) -> [Assignment] {
+        func day(_ offset: Int) -> DayKey { DayKey(calendar.date(byAdding: .day, value: offset, to: now) ?? now, calendar: calendar) }
+        func id(_ n: Int) -> UUID { UUID(uuidString: String(format: "DE300000-0000-4000-8000-0000000000%@%d", kind == .team ? "D" : "E", n))! }
+        switch kind {
+        case .team:
+            let roster = rosterID ?? UUID(uuidString: "DE300000-0000-4000-8000-0000000000B1")!
+            var tasks = [
+                Assignment(id: id(1), rosterID: roster, rosterName: "Lakeshore Storm U15", coachName: coachName, kind: .wallball,
+                           title: "Wall ball, left hand first", notes: "Start every set on your left.", schedule: .daily, startsOn: day(-10),
+                           targetReps: 200),
+                Assignment(id: id(2), rosterID: roster, rosterName: "Lakeshore Storm U15", coachName: coachName, kind: .training,
+                           title: "Stick skills", schedule: .weekly, startsOn: day(-20), targetMinutes: 180, category: .skills),
+                Assignment(id: id(3), rosterID: roster, rosterName: "Lakeshore Storm U15", coachName: coachName, kind: .check,
+                           title: "Watch the North Shore film", notes: "Note two rides you'd do differently.", schedule: .once,
+                           startsOn: day(-2), dueOn: day(2))
+            ]
+            if athletes.count > 2 {
+                tasks.append(Assignment(id: id(4), rosterID: roster, profileID: athletes[2], rosterName: "Lakeshore Storm U15", coachName: coachName,
+                                        kind: .check, title: "Check in with me about your week", schedule: .once, startsOn: day(-1), dueOn: day(1)))
+            }
+            return tasks
+        case .mental:
+            let roster = rosterID ?? UUID(uuidString: "DE300000-0000-4000-8000-0000000000B2")!
+            return [
+                Assignment(id: id(1), rosterID: roster, rosterName: "Mental-game clients", coachName: "Coach Rivera", kind: .training,
+                           title: "Visualisation", notes: "Walk through the draw routine before bed.", schedule: .weekly, startsOn: day(-14),
+                           targetMinutes: 45, category: .mental),
+                Assignment(id: id(2), rosterID: roster, rosterName: "Mental-game clients", coachName: "Coach Rivera", kind: .check,
+                           title: "Three lines in your game journal", schedule: .once, startsOn: day(-3), dueOn: day(3))
+            ]
+        }
     }
 }

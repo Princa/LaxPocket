@@ -1221,6 +1221,204 @@ delete from public.training_sessions where id = '30000000-0000-4000-8000-0000000
 delete from public.programs where profile_id = '10000000-0000-4000-8000-000000000001' and id = 'mindset';
 
 -- ---------------------------------------------------------------------------
+-- Coach tasks and game notes: F opens the team roster again and A adds the athlete.
+-- ---------------------------------------------------------------------------
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$ begin perform set_config('test.team_code', public.reset_roster_code(current_setting('test.team_roster')::uuid), false); end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$ begin perform public.join_roster(current_setting('test.team_code'), '10000000-0000-4000-8000-000000000001'); end $$;
+
+-- Only the coach gives tasks, only to their roster and athletes on it.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+insert into public.assignments (id, roster_id, kind, title, schedule, starts_on, target_reps)
+values ('a0000000-0000-4000-8000-000000000001', current_setting('test.team_roster')::uuid, 'wallball', '200 reps a day', 'daily',
+        '2026-10-01', 200);
+insert into public.assignments (id, roster_id, profile_id, kind, title, schedule, starts_on, due_on)
+values ('a0000000-0000-4000-8000-000000000002', current_setting('test.team_roster')::uuid, '10000000-0000-4000-8000-000000000001',
+        'check', 'Watch the Rivals film', 'once', '2026-10-01', '2026-10-04');
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.assignments) = 2, 'the coach sees their tasks';
+  assert (select coach_id from public.assignments limit 1) = '00000000-0000-4000-8000-00000000000f', 'coach_id is the coach';
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, target_minutes, category)
+    values (current_setting('test.team_roster')::uuid, 'training', 'Visualise', 'weekly', 30, 'mental');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a team coach can''t set mental minutes';
+  failed := false;
+  begin
+    insert into public.assignments (roster_id, profile_id, kind, title, schedule, due_on)
+    values (current_setting('test.team_roster')::uuid, '10000000-0000-4000-8000-000000000002', 'check', 'Not mine', 'once', '2026-12-01');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only for athletes on the roster';
+  failed := false;
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule)
+    values (current_setting('test.team_roster')::uuid, 'check', 'No due date', 'once');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a one-off task needs a due date';
+  failed := false;
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule)
+    values (current_setting('test.team_roster')::uuid, 'wallball', 'No target', 'daily');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'wall ball tasks have a rep target';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.assignments) = 0, 'another coach doesn''t see them';
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, due_on)
+    values (current_setting('test.team_roster')::uuid, 'check', 'Sneaky', 'once', '2026-12-01');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'another coach can''t give tasks on this roster';
+end
+$$;
+
+-- The family sees the tasks with the coach's name, and marks them done; the coach sees that.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+insert into public.assignment_completions (assignment_id, profile_id, period_start)
+values ('a0000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', '2026-10-05');
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.athlete_assignments where athlete_id = '10000000-0000-4000-8000-000000000001') = 2,
+    'the family sees both tasks';
+  assert (select bool_and(coach_name = 'Coach Fay' and roster_name = 'U15 Girls') from public.athlete_assignments), 'with names';
+  assert (select count(*) from public.assignments) = 0, 'families read tasks through athlete_assignments';
+  assert (select done_by from public.assignment_completions) = '00000000-0000-4000-8000-00000000000a', 'done_by is who ticked it';
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, due_on)
+    values (current_setting('test.team_roster')::uuid, 'check', 'From a parent', 'once', '2026-12-01');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only coaches give tasks';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000e';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    insert into public.assignment_completions (assignment_id, profile_id, period_start)
+    values ('a0000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', '2026-10-01');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a view-only coach can''t mark tasks done';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000b';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    -- B's own athlete isn't on the roster.
+    insert into public.assignment_completions (assignment_id, profile_id, period_start)
+    values ('a0000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002', '2026-10-05');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a task can only be marked done for an athlete it''s for';
+end
+$$;
+
+-- The coach writes a note on the game; the family reads it.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+insert into public.event_coach_notes (event_id, profile_id, note)
+values ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Great draws. Keep your stick up on D.');
+do $$
+begin
+  assert (select count(*) from public.assignment_completions) = 1, 'the coach sees what''s done';
+  assert (select count(*) from public.athlete_coach_notes) = 1, 'and their own notes';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert (select coach_name = 'Coach Fay' and note like 'Great draws%' from public.athlete_coach_notes), 'the family reads the note';
+  begin
+    insert into public.event_coach_notes (event_id, profile_id, note)
+    values ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Parent note');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only coaches write game notes';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000010';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    insert into public.event_coach_notes (event_id, profile_id, note)
+    values ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Not my athlete');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a coach who doesn''t coach the athlete can''t write notes';
+end
+$$;
+
+-- Off the roster, the athlete's tasks go and the coach can't add notes; notes already written stay with the family.
+reset role;
+delete from public.roster_athletes where roster_id = current_setting('test.team_roster')::uuid;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+begin
+  assert (select count(*) from public.athlete_assignments) = 0, 'no tasks once off the roster';
+  assert (select count(*) from public.athlete_coach_notes) = 1, 'the note stays';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    update public.event_coach_notes set note = 'Edited later' where coach_id = '00000000-0000-4000-8000-00000000000f';
+    if found then raise exception 'edited a note for an athlete no longer coached'; end if;
+  exception when insufficient_privilege then failed := true;
+  end;
+end
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Sport profiles: A adds hockey for Sam. The family comes along to every sport; coaches stay with one sport.
 -- H is another parent.
 -- ---------------------------------------------------------------------------
@@ -1477,7 +1675,8 @@ begin
     'programs', 'training_sessions', 'combine_results', 'combine_measurements', 'season_events', 'game_stats',
     'game_reflections', 'event_focus_goals', 'event_videos', 'event_checklist_items', 'expenses', 'mental_docs',
     'body_measurements', 'wallball_drills', 'wallball_sessions', 'wallball_sets', 'season_budgets', 'program_budgets',
-    'trips', 'profile_members', 'profile_invites', 'roster_athletes', 'mental_coach_trust'
+    'trips', 'profile_members', 'profile_invites', 'roster_athletes', 'mental_coach_trust', 'assignments', 'assignment_completions',
+    'event_coach_notes'
   ] loop
     execute format('select count(*) from public.%I where profile_id = %L', t, '10000000-0000-4000-8000-000000000001') into n;
     assert n = 0, format('%s rows remain after deleting the profile', t);

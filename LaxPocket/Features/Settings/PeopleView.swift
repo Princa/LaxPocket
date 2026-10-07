@@ -278,7 +278,7 @@ struct JoinAthleteView: View {
     /// Athletes on this iPhone a parent here can add to a roster: their own, or ones not in the cloud yet.
     private var parentAthletes: [ProfileSummary] {
         store.profiles.filter { summary in
-            guard summary.id != DemoSeason.profileID, cloud.noLongerShared.contains(summary.id) == false else { return false }
+            guard !summary.isDemo, cloud.noLongerShared.contains(summary.id) == false else { return false }
             guard let access = store.profileData(summary.id)?.access else { return true }
             return access.role == .owner || access.relationships.contains(.parent)
         }

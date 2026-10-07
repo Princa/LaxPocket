@@ -190,7 +190,7 @@ struct CloudSyncView: View {
         }
 
         Section {
-            if store.hasProfile && store.data.id != DemoSeason.profileID {
+            if store.hasProfile && !store.data.isDemo {
                 NavigationLink { PeopleView(summary: store.data.summary) } label: {
                     Label("People on \(store.data.summary.displayName)", systemImage: "person.2")
                 }
@@ -198,7 +198,7 @@ struct CloudSyncView: View {
             Button { showJoin = true } label: {
                 Label("Join with a code", systemImage: "number")
             }
-            if store.hasProfile && store.data.id != DemoSeason.profileID && (store.data.access?.canManagePeople ?? true) {
+            if store.hasProfile && !store.data.isDemo && (store.data.access?.canManagePeople ?? true) {
                 Button { showShare = true } label: {
                     Label("Share \(store.data.summary.displayName) by email", systemImage: "envelope")
                 }

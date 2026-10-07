@@ -35,6 +35,8 @@ backend (`supabase/`). See README.md for what each screen does.
   - `cd Core && swift test`
   - `supabase/tests/run-local.sh` when a migration or `supabase/tests/rls_test.sql` changes (needs a local Postgres)
   - On a Mac, build the app: `xcodebuild -project LaxPocket.xcodeproj -scheme LaxPocket -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`
+- Before adding a migration, fetch `origin/main` and give the file a timestamp after the newest one there: two branches
+  once both added a `20261009000000_…` migration.
 - Schema changes are a new file in `supabase/migrations` (never edit an applied one), with matching row types in
   `Core/Sources/LaxPocketCore/Cloud/CloudRows.swift`, checks in `supabase/tests/rls_test.sql`, and a note in
   `docs/supabase.md`.
@@ -43,15 +45,22 @@ backend (`supabase/`). See README.md for what each screen does.
   replace a policy with `drop policy if exists` + `create policy`, never `alter policy`; use `if not exists` and
   `create or replace`, so the file can be run again after a failed attempt. Test it against a database with an
   earlier object missing, not just a fresh one.
-- When the user needs to apply a migration, put it on their clipboard with `pbcopy < supabase/migrations/<file>.sql`
-  (and check it with `pbpaste | cmp - <file>`) instead of asking them to copy it by hand: a hand-copied file once lost
-  its closing `);` line.
+- The user wants migrations run for them. Apply one with the Supabase CLI's own sign-in (no database password):
+  `supabase db query --linked --project-ref xoepfhvesnttrggakfbf --file supabase/migrations/<file>.sql`. First check
+  read-only that the migrations it builds on are there (`to_regclass('public.<table>')`), apply in date order, then
+  check the result. Don't use `supabase db push`: earlier migrations were pasted into the SQL Editor, so the remote
+  migration history is empty and it would try to run them all again. If the CLI can't be used, put the file on the
+  user's clipboard with `pbcopy < <file>` (checked with `pbpaste | cmp - <file>`), never ask them to copy it by hand:
+  a hand-copied file once lost its closing `);` line.
 - Who sees what is defined twice and must change together: `private.readable_sections` / `writable_sections` (family
   accounts migration) and `private.roster_sections` (coach rosters migration), and `Relationship` / `RosterKind` in
   `Core/Sources/LaxPocketCore/Access.swift` and `Coaching.swift`. A locked mental doc is readable only by the
   account in `locked_by` and the mental coaches that account trusts, never by relationship, because the owner
   controls who's linked. Mental sessions are in the mental section, so a team coach never sees them.
 - Coaches read athletes live through `CloudSync.coachWorkspace`; never sync a coached athlete onto the coach's phone.
+- What coaches write (`assignments`, `event_coach_notes`) lives in its own tables and reaches family phones read only,
+  like `lockedDocs`; never give coaches write access to a table families sync, or a family's offline edit will
+  overwrite the coach's (or the other way round). Only coaches assign tasks.
 - The repo holds no personal data; test fixtures use made-up numbers.
 
 ## Keeping this file current

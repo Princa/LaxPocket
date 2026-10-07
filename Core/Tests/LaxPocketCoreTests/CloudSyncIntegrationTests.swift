@@ -257,6 +257,66 @@ final class CloudSyncIntegrationTests: XCTestCase {
         try await parent.deleteProfile(season.id)
     }
 
+    func testCoachTaskIsSeenAndTickedOff() async throws {
+        let season = Fixtures.season(name: "E2E tasks \(UUID().uuidString.prefix(6))")
+        let parent = await sync(tokenA)
+        let coach = await sync(tokenB)
+        let now = Date()
+        let calendar = Calendar.laxWeek
+        _ = try await parent.sync(local: season, base: nil)
+        try await coach.saveAccount(AccountRow(userID: try userID(tokenB), displayName: "Coach B", kind: .coach))
+        let rosterID = try await coach.createRoster(name: "E2E tasks", kind: .team)
+        let made = try await coach.rosters()
+        let code = try XCTUnwrap(made.first { $0.id == rosterID }?.joinCode)
+        _ = try await parent.joinRoster(code: code, profileID: season.id)
+
+        // 1. The coach gives the roster a one-off task and the athlete a daily one, and writes a note on a game.
+        let film = Assignment(rosterID: rosterID, kind: .check, title: "Watch the Rivals film", schedule: .once, startsOn: DayKey(now, calendar: calendar),
+                              dueOn: DayKey(now.addingTimeInterval(3 * 86_400), calendar: calendar))
+        let reps = Assignment(rosterID: rosterID, profileID: season.id, kind: .wallball, title: "Reps", schedule: .daily,
+                              startsOn: DayKey(now, calendar: calendar), targetReps: 100)
+        try await coach.saveAssignment(film)
+        try await coach.saveAssignment(reps)
+        try await coach.saveCoachNote(eventID: season.events[0].id, profileID: season.id, note: "Great draws")
+
+        // 2. The family sees both tasks and the note, with the coach's name, and ticks the film off.
+        let downloaded = try await parent.snapshot(profileID: season.id)
+        var base = try XCTUnwrap(downloaded)
+        var data = base.appData
+        XCTAssertEqual(Set(data.assignments.map(\.id)), [film.id, reps.id])
+        XCTAssertTrue(data.assignments.allSatisfy { $0.coachName == "Coach B" && $0.rosterName == "E2E tasks" })
+        XCTAssertEqual(data.coachNotes(for: season.events[0].id).map(\.note), ["Great draws"])
+        let filmStatus = try XCTUnwrap(data.assignmentStatus(film, now: now, calendar: calendar))
+        data.setAssignment(film.id, done: true, periodStart: filmStatus.periodStart)
+        base = try await parent.sync(local: data, base: base)
+
+        // 3. The coach sees it done.
+        var rosters = try await coach.coachWorkspace(now: now, calendar: calendar)
+        var roster = try XCTUnwrap(rosters.first { $0.id == rosterID })
+        XCTAssertEqual(Set(roster.assignments.map(\.id)), [film.id, reps.id])
+        XCTAssertEqual(roster.completion(of: film, now: now, calendar: calendar)?.done, 1)
+        XCTAssertEqual(roster.athletes.first?.data.coachNotes.first?.note, "Great draws")
+
+        // 4. Unticking reaches the coach too; clearing the note removes it for the family.
+        data = base.appData
+        data.setAssignment(film.id, done: false, periodStart: filmStatus.periodStart)
+        base = try await parent.sync(local: data, base: base)
+        rosters = try await coach.coachWorkspace(now: now, calendar: calendar)
+        roster = try XCTUnwrap(rosters.first { $0.id == rosterID })
+        XCTAssertEqual(roster.completion(of: film, now: now, calendar: calendar)?.done, 0)
+        try await coach.saveCoachNote(eventID: season.events[0].id, profileID: season.id, note: "  ")
+        let cleared = try await parent.snapshot(profileID: season.id)
+        XCTAssertEqual(cleared?.coachNotes.count, 0)
+
+        // 5. A task the coach deletes goes from the family's phone at the next sync, with nothing left to send.
+        try await coach.deleteAssignment(film.id)
+        base = try await parent.sync(local: base.appData, base: base)
+        XCTAssertEqual(base.appData.assignments.map(\.id), [reps.id])
+
+        try await coach.deleteRoster(rosterID)
+        try await parent.deleteProfile(season.id)
+    }
+
     func testAthleteJoinsWithACodeAndLocksADoc() async throws {
         let season = Fixtures.season(name: "E2E family \(UUID().uuidString.prefix(6))")
         let parent = await sync(tokenA)

@@ -56,6 +56,23 @@ struct HomeView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle(color: theme.primary))
 
+                    let tasks = data.assignmentStatuses(now: now)
+                    if !tasks.isEmpty {
+                        SectionHeader(title: "From your coaches") {
+                            Text("\(tasks.filter(\.isDone).count) of \(tasks.count) done").font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
+                        .padding(.top, 6)
+                        Card(padding: 0) {
+                            ForEach(Array(tasks.enumerated()), id: \.element.id) { index, status in
+                                AssignmentStatusRow(status: status, onTick: data.canWrite(.training) ? { done in
+                                    store.setAssignment(status.assignment.id, done: done, periodStart: status.periodStart)
+                                } : nil)
+                                .padding(.horizontal, 14)
+                                if index < tasks.count - 1 { Divider().overlay(AppTheme.line).padding(.leading, 14) }
+                            }
+                        }
+                    }
+
                     if data.canRead(.mental) {
                         NavigationLink { MindsetView() } label: {
                             mentalGameRow(docCount: data.docs.count + data.lockedDocs.count, toReview: docsToReview)

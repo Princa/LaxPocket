@@ -52,6 +52,9 @@ final class SportProfileTests: XCTestCase {
         // A third sport added from the second still belongs to the same athlete.
         let third = hockey.addingSport(.lacrosse)
         XCTAssertEqual(third.athleteKey, sam.id)
+        XCTAssertFalse(hockey.isDemo)
+        let demoHockey = DemoSeason.make(now: Fixtures.day(0)).addingSport(.hockey)
+        XCTAssertTrue(demoHockey.isDemo && demoHockey.summary.isDemo, "a sport added for the demo athlete stays on the phone too")
     }
 
     func testIndexGroupsEachAthletesSports() {
@@ -92,6 +95,8 @@ final class SportProfileTests: XCTestCase {
         XCTAssertFalse(Sport.hockey.hasWallball || Sport.hockey.hasNDTPTesting || Sport.hockey.hasGameStats)
         XCTAssertFalse(RosterKind.team.sharingSummary(for: .hockey).contains("wall ball"))
         XCTAssertTrue(RosterKind.team.sharingSummary.contains("wall ball"))
+        XCTAssertEqual(AssignmentKind.available(for: .lacrosse), [.wallball, .training, .check])
+        XCTAssertEqual(AssignmentKind.available(for: .hockey), [.training, .check], "no wall ball tasks for hockey")
     }
 
     func testHockeyProfileRoundTripsThroughTheCloud() {

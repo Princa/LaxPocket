@@ -1,4 +1,5 @@
 import SwiftUI
+import LaxPocketCore
 
 @main
 struct LaxPocketApp: App {
@@ -8,12 +9,20 @@ struct LaxPocketApp: App {
 
     init() {
         let store = AppStore()
+        let cloud = CloudStore(appStore: store)
         #if DEBUG
-        // `-demo` (e.g. `xcrun simctl launch booted com.princa.laxpocket -demo`) loads the made-up demo athlete.
-        if ProcessInfo.processInfo.arguments.contains("-demo") { store.loadDemoAthlete() }
+        // `-demo` (e.g. `xcrun simctl launch booted com.princa.laxpocket -demo`) loads the made-up demo athlete, and
+        // `-demo-as parent|athlete|coach|mentalCoach` loads her as that account would see her in the cloud.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-demo-as"), index + 1 < arguments.count,
+           let viewer = Relationship(rawValue: arguments[index + 1]) {
+            cloud.loadDemo(viewer: viewer)
+        } else if arguments.contains("-demo") {
+            cloud.loadDemo(viewer: nil)
+        }
         #endif
         _store = State(initialValue: store)
-        _cloud = State(initialValue: CloudStore(appStore: store))
+        _cloud = State(initialValue: cloud)
     }
 
     var body: some Scene {

@@ -61,6 +61,12 @@ struct GameDetailView: View {
                         }
                     }
 
+                    let notes = store.data.coachNotes(for: event.id)
+                    if !notes.isEmpty {
+                        SectionHeader(title: "Coach notes").padding(.top, 8)
+                        CoachNotesCard(notes: notes)
+                    }
+
                     if let reflection = event.reflection {
                         SectionHeader(title: "Post-game reflection").padding(.top, 8)
                         reflectionCard(reflection)

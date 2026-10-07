@@ -50,14 +50,26 @@ public struct CoachRoster: Identifiable, Equatable, Sendable {
     public var joinCode: String?
     /// By name.
     public var athletes: [CoachAthlete]
+    /// Tasks given on this roster, to everyone or to one athlete. Newest first.
+    public var assignments: [Assignment]
 
-    public init(id: UUID, name: String, kind: RosterKind, sport: Sport = .lacrosse, joinCode: String?, athletes: [CoachAthlete]) {
+    public init(id: UUID, name: String, kind: RosterKind, sport: Sport = .lacrosse, joinCode: String?, athletes: [CoachAthlete],
+                assignments: [Assignment] = []) {
         self.id = id
         self.name = name
         self.kind = kind
         self.sport = sport
         self.joinCode = joinCode
         self.athletes = athletes
+        self.assignments = assignments
+    }
+
+    /// How many of the athletes a task is for have it done for the period that includes `now`, of how many it's for.
+    /// Nil when the task isn't running now.
+    public func completion(of assignment: Assignment, now: Date, calendar: Calendar = .laxWeek) -> (done: Int, of: Int)? {
+        let statuses = athletes.filter { assignment.isFor($0.id) }.compactMap { $0.data.assignmentStatus(assignment, now: now, calendar: calendar) }
+        guard assignment.period(containing: now, calendar: calendar) != nil else { return nil }
+        return (statuses.filter(\.isDone).count, statuses.count)
     }
 }
 
