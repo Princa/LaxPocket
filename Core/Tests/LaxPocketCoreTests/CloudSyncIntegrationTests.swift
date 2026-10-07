@@ -426,4 +426,61 @@ final class CloudSyncIntegrationTests: XCTestCase {
         try await owner.deleteProfile(hockey.id)
         try await owner.deleteProfile(lacrosse.id)
     }
+
+    func testHockeyPracticeSyncsAndTheCoachSeesIt() async throws {
+        let lacrosse = Fixtures.season(name: "E2E practice \(UUID().uuidString.prefix(6))")
+        let owner = await sync(tokenA)
+        let coach = await sync(tokenB)
+        let now = Fixtures.day(1, hour: 20)
+        _ = try await owner.sync(local: lacrosse, base: nil)
+
+        // 1. The owner adds hockey with a week of practice and one drill of their own.
+        var hockey = lacrosse.addingSport(.hockey)
+        hockey.profile.weeklyShotGoal = 1500
+        hockey.practiceDrills = [PracticeDrill(id: "tarp-corners", name: "Tarp corners", kind: .shooting, measure: .shots,
+                                               tracksTarget: true, defaultAmount: 40)]
+        hockey.practiceSessions = [
+            PracticeSession(date: Fixtures.day(0), sets: [PracticeSet(drillID: "wrist-shot", amount: 100, onTarget: 64),
+                                                          PracticeSet(drillID: "quick-hands", amount: 10)], minutes: 25),
+            PracticeSession(date: Fixtures.day(1), sets: [PracticeSet(drillID: "tarp-corners", amount: 40, onTarget: 22)]),
+            PracticeSession(date: Fixtures.day(1, hour: 19), sets: [PracticeSet(drillID: "quick-hands", amount: 90)], challengeSeconds: 30)
+        ]
+        var base = try await owner.sync(local: hockey, base: nil)
+        XCTAssertEqual(base.appData.practiceSessions, hockey.practiceSessions)
+        XCTAssertEqual(base.appData.practiceDrills, hockey.practiceDrills)
+        XCTAssertEqual(base.profile.weeklyShotGoal, 1500)
+
+        // 2. Edits and a delete go up; the lacrosse profile has none of it.
+        var edited = base.appData
+        edited.practiceSessions[0].sets[0].amount = 120
+        edited.practiceSessions.removeAll { $0.isChallenge }
+        base = try await owner.sync(local: edited, base: base)
+        let cloud = try await owner.snapshot(profileID: hockey.id)
+        XCTAssertEqual(cloud?.appData.practiceSessions.map(\.sets.first?.amount), [120, 40])
+        let lacrosseCloud = try await owner.snapshot(profileID: lacrosse.id)
+        XCTAssertEqual(lacrosseCloud?.practiceSessions.isEmpty, true)
+
+        // 3. A hockey coach sees the practice and gives a shots task that ticks itself off from it.
+        let rosterID = try await coach.createRoster(name: "E2E U15 AA", kind: .team, sport: .hockey)
+        let rosters = try await coach.rosters()
+        let code = try XCTUnwrap(rosters.first { $0.id == rosterID }?.joinCode)
+        _ = try await owner.joinRoster(code: code, profileID: hockey.id)
+        let weekStart = DayKey(Workload.startOfWeek(for: now))
+        try await coach.saveAssignment(Assignment(rosterID: rosterID, kind: .shots, title: "Shots", schedule: .weekly, startsOn: weekStart,
+                                                  targetReps: 150))
+        let workspace = try await coach.coachWorkspace(now: now)
+        let athlete = try XCTUnwrap(workspace.first { $0.id == rosterID }?.athletes.first)
+        XCTAssertEqual(athlete.data.profile.sport, .hockey)
+        XCTAssertEqual(athlete.week(now: now).practice.shots, 160)
+        XCTAssertEqual(athlete.data.practiceLibrary.last?.name, "Tarp corners", "the coach sees the athlete's own drills")
+        let mine = try await owner.snapshot(profileID: hockey.id)
+        let status = try XCTUnwrap(mine?.appData.assignmentStatuses(now: now).first)
+        XCTAssertEqual(status.assignment.kind, .shots)
+        XCTAssertEqual(status.logged, 160)
+        XCTAssertTrue(status.isDone)
+
+        try await coach.deleteRoster(rosterID)
+        try await owner.deleteProfile(hockey.id)
+        try await owner.deleteProfile(lacrosse.id)
+    }
 }
