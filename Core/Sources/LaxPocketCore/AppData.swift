@@ -26,10 +26,22 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var playsGoal: Bool
     /// Hockey: age group and tier, e.g. "U15 AA".
     public var level: String
+    /// Hockey: shots a week the athlete aims for; 0 for no goal.
+    public var weeklyShotGoal: Int
+    /// Hockey: stickhandling minutes a week the athlete aims for; 0 for no goal.
+    public var weeklyStickhandlingGoal: Int
+
+    public static let defaultWeeklyShotGoal = 1000
+    public static let defaultWeeklyStickhandlingGoal = 60
+    /// What the database takes.
+    public static let weeklyShotGoalRange = 0...100_000
+    public static let weeklyStickhandlingGoalRange = 0...10_080
 
     public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup? = nil, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
                 bodyUnits: BodyUnits = .imperial, usdToCAD: Double = ExchangeRate.defaultUSDToCAD, sport: Sport = .lacrosse, athleteID: UUID? = nil,
-                shoots: Handedness? = nil, playsGoal: Bool = false, level: String = "") {
+                shoots: Handedness? = nil, playsGoal: Bool = false, level: String = "",
+                weeklyShotGoal: Int = AthleteProfile.defaultWeeklyShotGoal,
+                weeklyStickhandlingGoal: Int = AthleteProfile.defaultWeeklyStickhandlingGoal) {
         self.firstName = firstName
         self.classYear = classYear
         self.positions = positions
@@ -44,11 +56,13 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         self.shoots = shoots
         self.playsGoal = playsGoal
         self.level = level
+        self.weeklyShotGoal = weeklyShotGoal
+        self.weeklyStickhandlingGoal = weeklyStickhandlingGoal
     }
 
     private enum CodingKeys: String, CodingKey {
         case firstName, classYear, positions, benchmarkGroup, mentalCoachName, weeklyGoalHours, season, bodyUnits, usdToCAD
-        case sport, athleteID, shoots, playsGoal, level
+        case sport, athleteID, shoots, playsGoal, level, weeklyShotGoal, weeklyStickhandlingGoal
     }
 
     /// Profiles saved before height and weight tracking have no `bodyUnits`, those saved before currencies have no
@@ -69,6 +83,9 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         shoots = try c.decodeIfPresent(Handedness.self, forKey: .shoots)
         playsGoal = try c.decodeIfPresent(Bool.self, forKey: .playsGoal) ?? false
         level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
+        weeklyShotGoal = try c.decodeIfPresent(Int.self, forKey: .weeklyShotGoal) ?? AthleteProfile.defaultWeeklyShotGoal
+        weeklyStickhandlingGoal = try c.decodeIfPresent(Int.self, forKey: .weeklyStickhandlingGoal)
+            ?? AthleteProfile.defaultWeeklyStickhandlingGoal
     }
 
     /// Focus tags for a team or skills session in this profile's sport.
@@ -148,13 +165,18 @@ public struct AppData: Codable, Equatable, Identifiable, Sendable {
     /// Drills the athlete added, and built-in drills the athlete changed. Built-ins left as they are aren't stored.
     public var wallballDrills: [WallballDrill]
     public var wallballSessions: [WallballSession]
+    /// Hockey's practice drills the athlete added or changed. Built-ins left as they are aren't stored.
+    public var practiceDrills: [PracticeDrill]
+    /// Hockey's shooting, stickhandling and passing practice.
+    public var practiceSessions: [PracticeSession]
     public var themeID: String
 
     public init(id: UUID = UUID(), profile: AthleteProfile, programs: [Program] = [], sessions: [TrainingSession] = [], combineResults: [CombineResult] = [], events: [SeasonEvent] = [], expenses: [Expense] = [], seasonBudget: Double = 0, docs: [MentalDoc] = [], bodyMeasurements: [BodyMeasurement] = [],
                 wallballDrills: [WallballDrill] = [], wallballSessions: [WallballSession] = [], themeID: String = ThemeCatalog.defaultID,
                 seasonBudgets: [SeasonBudget] = [], programBudgets: [ProgramBudget] = [], trips: [Trip] = [],
                 lockedDocs: [LockedMentalDoc] = [], access: ProfileAccess? = nil, assignments: [Assignment] = [],
-                assignmentCompletions: [AssignmentCompletion] = [], coachNotes: [CoachNote] = []) {
+                assignmentCompletions: [AssignmentCompletion] = [], coachNotes: [CoachNote] = [],
+                practiceDrills: [PracticeDrill] = [], practiceSessions: [PracticeSession] = []) {
         self.id = id
         self.schemaVersion = AppData.currentSchemaVersion
         self.profile = profile
@@ -175,6 +197,8 @@ public struct AppData: Codable, Equatable, Identifiable, Sendable {
         self.bodyMeasurements = bodyMeasurements
         self.wallballDrills = wallballDrills
         self.wallballSessions = wallballSessions
+        self.practiceDrills = practiceDrills
+        self.practiceSessions = practiceSessions
         self.themeID = themeID
         // `seasonBudget` is the current season's overall budget.
         if seasonBudget > 0 { self.seasonBudget = seasonBudget }
@@ -182,7 +206,8 @@ public struct AppData: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, schemaVersion, profile, programs, sessions, combineResults, events, expenses, seasonBudgets, programBudgets, trips, docs,
-             lockedDocs, access, assignments, assignmentCompletions, coachNotes, bodyMeasurements, wallballDrills, wallballSessions, themeID
+             lockedDocs, access, assignments, assignmentCompletions, coachNotes, bodyMeasurements, wallballDrills, wallballSessions,
+             practiceDrills, practiceSessions, themeID
     }
 
     /// Files saved before budgets per season had one `seasonBudget` for the season the profile was set to.
@@ -218,6 +243,8 @@ public struct AppData: Codable, Equatable, Identifiable, Sendable {
         bodyMeasurements = try c.decodeIfPresent([BodyMeasurement].self, forKey: .bodyMeasurements) ?? []
         wallballDrills = try c.decodeIfPresent([WallballDrill].self, forKey: .wallballDrills) ?? []
         wallballSessions = try c.decodeIfPresent([WallballSession].self, forKey: .wallballSessions) ?? []
+        practiceDrills = try c.decodeIfPresent([PracticeDrill].self, forKey: .practiceDrills) ?? []
+        practiceSessions = try c.decodeIfPresent([PracticeSession].self, forKey: .practiceSessions) ?? []
         themeID = try c.decodeIfPresent(String.self, forKey: .themeID) ?? ThemeCatalog.defaultID
     }
 
@@ -270,12 +297,12 @@ public struct AppData: Codable, Equatable, Identifiable, Sendable {
     }
 
     /// A clean season for the same athlete: keeps the profile, programs, budgets, trips and expenses (each belongs to a
-    /// season), height and weight history, wall ball drills and theme, drops the season's logged data. Trips lose their
-    /// link to the events that go.
+    /// season), height and weight history, wall ball and practice drills and theme, drops the season's logged data. Trips
+    /// lose their link to the events that go.
     public func blankSeason() -> AppData {
         AppData(id: id, profile: profile, programs: programs, expenses: expenses, bodyMeasurements: bodyMeasurements,
                 wallballDrills: wallballDrills, themeID: themeID, seasonBudgets: seasonBudgets, programBudgets: programBudgets,
-                trips: trips.map { var trip = $0; trip.eventID = nil; return trip }, access: access)
+                trips: trips.map { var trip = $0; trip.eventID = nil; return trip }, access: access, practiceDrills: practiceDrills)
     }
 
     public static let encoder: JSONEncoder = {

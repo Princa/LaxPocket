@@ -1632,6 +1632,132 @@ set role authenticated;
 delete from public.profiles where id = '10000000-0000-4000-8000-000000000005';
 
 -- ---------------------------------------------------------------------------
+-- Hockey practice: A adds hockey for Sam again and logs shooting and stickhandling. F's hockey team reads it, and F
+-- gives shots and stickhandling tasks.
+-- ---------------------------------------------------------------------------
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+insert into public.profiles (id, first_name, sport, athlete_id)
+values ('10000000-0000-4000-8000-000000000006', 'Sam', 'hockey', '10000000-0000-4000-8000-000000000001');
+insert into public.practice_drills (profile_id, id, kind, name, measure, tracks_target, default_amount)
+values ('10000000-0000-4000-8000-000000000006', 'tarp-corners', 'shooting', 'Tarp corners', 'shots', true, 40);
+insert into public.practice_sessions (id, profile_id, done_at, minutes)
+values ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000006', '2026-09-29T17:00:00Z', 35);
+insert into public.practice_sets (session_id, profile_id, drill_id, amount, on_target, position) values
+  ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000006', 'wrist-shot', 100, 64, 0),
+  ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000006', 'backhand', 20, null, 1),
+  ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000006', 'quick-hands', 10, null, 2);
+do $$
+declare failed boolean := false;
+begin
+  assert (select weekly_shot_goal = 1000 and weekly_stickhandling_goal = 60 from public.profiles
+          where id = '10000000-0000-4000-8000-000000000006'), 'weekly goals start at 1,000 shots and 60 minutes';
+  assert (select sum(amount) from public.practice_sets) = 130, 'A logs practice';
+  begin
+    insert into public.practice_sets (session_id, profile_id, drill_id, amount, on_target)
+    values ('90000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000006', 'snap-shot', 10, 11);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'no more on target than shots';
+  failed := false;
+  begin
+    insert into public.practice_drills (profile_id, id, kind, name, measure, tracks_target, default_amount)
+    values ('10000000-0000-4000-8000-000000000006', 'odd', 'stickhandling', 'Odd', 'minutes', true, 5);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'only shots count on target';
+  failed := false;
+  begin
+    update public.profiles set weekly_shot_goal = -1 where id = '10000000-0000-4000-8000-000000000006';
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'goals stay in range';
+end
+$$;
+
+-- A stranger sees none of it; the hockey team reads it but can't change it.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+begin
+  assert (select count(*) from public.practice_sessions) = 0 and (select count(*) from public.practice_sets) = 0
+     and (select count(*) from public.practice_drills) = 0, 'a stranger sees no practice';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$ begin perform public.join_roster(current_setting('test.hockey_code'), '10000000-0000-4000-8000-000000000006'); end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+update public.practice_sets set amount = 5000 where profile_id = '10000000-0000-4000-8000-000000000006';
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.practice_sessions) = 1, 'the hockey coach sees practice';
+  assert (select sum(amount) from public.practice_sets) = 130, 'and can''t change it';
+  assert (select count(*) from public.practice_drills) = 1, 'and the athlete''s own drills';
+
+  -- Tasks: shots and stickhandling on a hockey roster, never wall ball; and the other way round on lacrosse.
+  insert into public.assignments (id, roster_id, kind, title, schedule, starts_on, target_reps)
+  values ('a0000000-0000-4000-8000-000000000011', current_setting('test.hockey_roster')::uuid, 'shots', '1,000 shots a week', 'weekly',
+          '2026-09-28', 1000);
+  insert into public.assignments (id, roster_id, kind, title, schedule, starts_on, target_minutes)
+  values ('a0000000-0000-4000-8000-000000000012', current_setting('test.hockey_roster')::uuid, 'stickhandling', 'Hands every week',
+          'weekly', '2026-09-28', 60);
+  assert (select count(*) from public.assignments where roster_id = current_setting('test.hockey_roster')::uuid) = 2,
+    'the coach gives shots and stickhandling tasks';
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, target_minutes)
+    values (current_setting('test.hockey_roster')::uuid, 'shots', 'No target', 'daily', 30);
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'a shots task counts shots, not minutes';
+  failed := false;
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, target_reps)
+    values (current_setting('test.hockey_roster')::uuid, 'wallball', 'Wall ball', 'daily', 200);
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'no wall ball tasks on a hockey roster';
+  failed := false;
+  begin
+    insert into public.assignments (roster_id, kind, title, schedule, target_reps)
+    values (current_setting('test.team_roster')::uuid, 'shots', 'Shots', 'daily', 100);
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'no shots tasks on a lacrosse roster';
+end
+$$;
+
+-- The family sees the tasks, and the athlete's practice ticks them off in the app.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+begin
+  assert (select array_agg(kind order by kind) from public.athlete_assignments
+          where athlete_id = '10000000-0000-4000-8000-000000000006') = '{shots,stickhandling}', 'the family sees the hockey tasks';
+end
+$$;
+
+-- Put things back: hockey and its tasks go, and practice goes with the profile.
+delete from public.profiles where id = '10000000-0000-4000-8000-000000000006';
+reset role;
+delete from public.assignments where roster_id = current_setting('test.hockey_roster')::uuid;
+do $$
+begin
+  assert (select count(*) from public.practice_sessions) = 0 and (select count(*) from public.practice_sets) = 0
+     and (select count(*) from public.practice_drills) = 0, 'practice goes with the profile';
+end
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Deleting a profile removes everything under it
 -- ---------------------------------------------------------------------------
 reset role;

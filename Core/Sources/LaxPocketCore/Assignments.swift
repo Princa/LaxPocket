@@ -2,8 +2,12 @@ import Foundation
 
 /// What a coach's task asks for. Matches `assignments.kind` in the cloud.
 public enum AssignmentKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    /// A number of wall ball reps; done once the athlete's wall ball log reaches it.
+    /// A number of wall ball reps (lacrosse); done once the athlete's wall ball log reaches it.
     case wallball
+    /// A number of shots (hockey); done once the athlete's practice log reaches it.
+    case shots
+    /// Minutes of stickhandling drills (hockey); done once the athlete's practice log reaches it.
+    case stickhandling
     /// Minutes of training, of one category or any; done once the logged sessions reach it.
     case training
     /// Anything else (watch game film, a journal prompt); the athlete or a parent ticks it off.
@@ -14,14 +18,29 @@ public enum AssignmentKind: String, Codable, CaseIterable, Identifiable, Sendabl
     public var title: String {
         switch self {
         case .wallball: return "Wall ball reps"
+        case .shots: return "Shots"
+        case .stickhandling: return "Stickhandling minutes"
         case .training: return "Training minutes"
         case .check: return "Tick off"
         }
     }
 
-    /// The kinds a coach can give on a roster for this sport: wall ball only where the sport has it.
+    /// A count of reps or shots (`targetReps`).
+    public var countsReps: Bool { self == .wallball || self == .shots }
+
+    /// A number of minutes (`targetMinutes`).
+    public var countsMinutes: Bool { self == .training || self == .stickhandling }
+
+    /// The kinds a coach can give on a roster for this sport: wall ball for lacrosse, shots and stickhandling for
+    /// hockey, and training and tick-off for both.
     public static func available(for sport: Sport) -> [AssignmentKind] {
-        allCases.filter { $0 != .wallball || sport.hasWallball }
+        allCases.filter { kind in
+            switch kind {
+            case .wallball: return sport.hasWallball
+            case .shots, .stickhandling: return sport.hasPractice
+            case .training, .check: return true
+            }
+        }
     }
 }
 
@@ -140,6 +159,8 @@ public struct Assignment: Identifiable, Codable, Hashable, Sendable {
         let what: String
         switch kind {
         case .wallball: what = "\(targetReps ?? 0) wall ball reps"
+        case .shots: what = "\((targetReps ?? 0).formatted()) shots"
+        case .stickhandling: what = "\(AssignmentStatus.duration(targetMinutes ?? 0)) of stickhandling"
         case .training:
             let minutes = targetMinutes ?? 0
             let amount = minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes) min"
@@ -242,6 +263,8 @@ public struct AssignmentStatus: Identifiable, Hashable, Sendable {
     public var progressText: String {
         switch assignment.kind {
         case .wallball: return "\(logged ?? 0) / \(target ?? 0) reps"
+        case .shots: return "\((logged ?? 0).formatted()) / \((target ?? 0).formatted()) shots"
+        case .stickhandling: return "\(Self.duration(logged ?? 0)) of \(Self.duration(target ?? 0))"
         case .training: return "\(Self.duration(logged ?? 0)) of \(Self.duration(target ?? 0))"
         case .check: return isDone ? "Done" : "To do"
         }
@@ -274,6 +297,14 @@ extension AppData {
         case .wallball:
             logged = WallballStats.reps(wallballSessions.filter { interval.contains($0.date) && $0.date < interval.end }).total
             target = assignment.targetReps
+        case .shots:
+            logged = PracticeStats.totals(practiceSessions.filter { interval.contains($0.date) && $0.date < interval.end },
+                                          library: practiceLibrary).shots
+            target = assignment.targetReps
+        case .stickhandling:
+            let inPeriod = practiceSessions.filter { interval.contains($0.date) && $0.date < interval.end }
+            logged = PracticeStats.byKind(inPeriod, library: practiceLibrary)[.stickhandling]?.wholeMinutes ?? 0
+            target = assignment.targetMinutes
         case .training:
             logged = sessions.filter { interval.contains($0.date) && $0.date < interval.end && (assignment.category == nil || $0.category == assignment.category) }
                 .reduce(0) { $0 + $1.minutes }

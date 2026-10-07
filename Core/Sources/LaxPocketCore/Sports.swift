@@ -54,8 +54,19 @@ public enum Sport: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Daily wall ball, by hand. Hockey's home practice comes later.
+    /// Daily wall ball, by hand.
     public var hasWallball: Bool { self == .lacrosse }
+
+    /// Home practice counted in shots, minutes and reps (`Practice.swift`): hockey's shooting, stickhandling and passing.
+    public var hasPractice: Bool { self == .hockey }
+
+    /// What the home practice is called.
+    public var practiceTitle: String {
+        switch self {
+        case .lacrosse: return "Wall ball"
+        case .hockey: return "Shooting & stickhandling"
+        }
+    }
 
     /// Combine results scored against the NDTP standards. Hockey's NHL Combine testing comes later.
     public var hasNDTPTesting: Bool { self == .lacrosse }

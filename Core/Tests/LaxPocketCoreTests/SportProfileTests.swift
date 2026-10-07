@@ -96,7 +96,7 @@ final class SportProfileTests: XCTestCase {
         XCTAssertFalse(RosterKind.team.sharingSummary(for: .hockey).contains("wall ball"))
         XCTAssertTrue(RosterKind.team.sharingSummary.contains("wall ball"))
         XCTAssertEqual(AssignmentKind.available(for: .lacrosse), [.wallball, .training, .check])
-        XCTAssertEqual(AssignmentKind.available(for: .hockey), [.training, .check], "no wall ball tasks for hockey")
+        XCTAssertEqual(AssignmentKind.available(for: .hockey), [.shots, .stickhandling, .training, .check], "no wall ball tasks for hockey")
     }
 
     func testHockeyProfileRoundTripsThroughTheCloud() {
