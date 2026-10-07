@@ -20,6 +20,8 @@ struct PeopleView: View {
     private var access: ProfileAccess? { store.profileData(summary.id)?.access }
     private var isOwner: Bool { access?.canManagePeople ?? true }
     private var hasAthleteLogin: Bool { people.contains { $0.access.relationships.contains(.athlete) } }
+    /// The athlete's other sports on this phone.
+    private var otherSports: [ProfileSummary] { store.index.sportProfiles(of: summary.id).filter { $0.id != summary.id } }
     /// The owner or a parent can take the athlete off a coach's roster.
     private var isParent: Bool { access.map { $0.role == .owner || $0.relationships.contains(.parent) } ?? true }
 
@@ -45,7 +47,11 @@ struct PeopleView: View {
             } header: {
                 Text("On \(summary.displayName)")
             } footer: {
-                if isOwner && people.count > 1 { Text("Swipe to remove someone. Their phone keeps what it already has but stops syncing.") }
+                if isOwner && people.count > 1 {
+                    Text(otherSports.isEmpty
+                         ? "Swipe to remove someone. Their phone keeps what it already has but stops syncing."
+                         : "The family is the same in every sport \(summary.displayName) plays. Swipe to remove someone: a parent or \(summary.displayName)’s own login comes off every sport. Their phone keeps what it already has but stops syncing.")
+                }
             }
 
             if !coaches.isEmpty {
@@ -108,7 +114,7 @@ struct PeopleView: View {
                 Section {
                     Button("Leave \(summary.displayName)", role: .destructive) { confirmLeave = true }
                 } footer: {
-                    Text("Stops syncing \(summary.displayName) with this account and removes them from this iPhone. The owner can invite you again.")
+                    Text("Stops syncing \(summary.displayName)\(otherSports.isEmpty ? "" : ", in every sport,") with this account and removes them from this iPhone. The owner can invite you again.")
                 }
             }
 
@@ -219,7 +225,7 @@ struct InviteCodeView: View {
     let invite: ShownInvite
 
     private var instructions: String {
-        "Join \(athleteName) on LaxPocket: sign in (or create an account) in Theme & settings → Cloud sync, tap Join with a code, "
+        "Join \(athleteName) on SportsPocket: sign in (or create an account) in Theme & settings → Cloud sync, tap Join with a code, "
             + "and enter \(invite.displayCode). The code works once and expires in a week."
     }
 
@@ -272,10 +278,21 @@ struct JoinAthleteView: View {
     /// Athletes on this iPhone a parent here can add to a roster: their own, or ones not in the cloud yet.
     private var parentAthletes: [ProfileSummary] {
         store.profiles.filter { summary in
-            guard summary.id != DemoSeason.profileID, cloud.noLongerShared.contains(summary.id) == false else { return false }
+            guard !summary.isDemo, cloud.noLongerShared.contains(summary.id) == false else { return false }
             guard let access = store.profileData(summary.id)?.access else { return true }
             return access.role == .owner || access.relationships.contains(.parent)
         }
+    }
+
+    /// The sport of the roster a code is for.
+    private var rosterSport: Sport? {
+        if case .roster(_, _, _, let sport) = info { return sport }
+        return nil
+    }
+
+    /// The parent's athletes' profiles for the roster's sport: only those can join it.
+    private var rosterAthletes: [ProfileSummary] {
+        parentAthletes.filter { $0.sport == rosterSport }
     }
 
     var body: some View {
@@ -297,22 +314,28 @@ struct JoinAthleteView: View {
                         LabeledContent("Athlete", value: athlete.isEmpty ? "Unnamed" : athlete)
                         LabeledContent("You join as", value: relationship.title)
                     } footer: {
-                        Text("\(athlete) comes onto this iPhone and syncs with your account.")
+                        Text([.parent, .athlete].contains(relationship)
+                             ? "\(athlete) comes onto this iPhone, with every sport they play, and syncs with your account."
+                             : "\(athlete) comes onto this iPhone and syncs with your account.")
                     }
-                case .roster(let name, let kind, let coach):
+                case .roster(let name, let kind, let coach, let sport):
                     Section {
                         LabeledContent("Roster", value: name)
+                        LabeledContent("Sport", value: sport.title)
                         LabeledContent("Coach", value: coach.isEmpty ? "Not named" : coach)
                         if parentAthletes.isEmpty {
                             Text("Only a parent can add an athlete to a roster, from a phone with that athlete on it.")
                                 .foregroundStyle(AppTheme.muted)
+                        } else if rosterAthletes.isEmpty {
+                            Text("This is a \(sport.title.lowercased()) roster. Add a \(sport.title.lowercased()) profile for your athlete first, in Theme & settings → Athletes.")
+                                .foregroundStyle(AppTheme.muted)
                         } else {
                             Picker("Athlete", selection: $athleteID) {
-                                ForEach(parentAthletes) { Text($0.displayName).tag(Optional($0.id)) }
+                                ForEach(rosterAthletes) { Text($0.displayName).tag(Optional($0.id)) }
                             }
                         }
                     } footer: {
-                        Text("The coach will see: \(kind.sharingSummary) You can take your athlete off the roster any time in People.")
+                        Text("The coach sees only your athlete's \(sport.title.lowercased()) profile: \(kind.sharingSummary(for: sport)) You can take your athlete off the roster any time in People.")
                     }
                 case nil:
                     EmptyView()
@@ -347,7 +370,8 @@ struct JoinAthleteView: View {
     private func describe() {
         run {
             info = try await cloud.describe(code: cleaned)
-            athleteID = store.hasProfile && parentAthletes.contains { $0.id == store.data.id } ? store.data.id : parentAthletes.first?.id
+            let choices = rosterSport == nil ? parentAthletes : rosterAthletes
+            athleteID = store.hasProfile && choices.contains { $0.id == store.data.id } ? store.data.id : choices.first?.id
         }
     }
 

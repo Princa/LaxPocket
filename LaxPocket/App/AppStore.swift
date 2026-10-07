@@ -52,9 +52,26 @@ final class AppStore {
 
     var palette: ThemePalette { ThemeCatalog.palette(id: data.themeID) }
     var profile: AthleteProfile { data.profile }
+    var sport: Sport { data.profile.sport }
     var profiles: [ProfileSummary] { index.profiles }
     var hasProfile: Bool { index.activeProfileID != nil }
     var now: Date { Date() }
+
+    /// The active athlete's sport profiles on this phone, the active one included.
+    var athleteSports: [ProfileSummary] { index.sportProfiles(of: data.id) }
+
+    /// Sports the athlete a profile belongs to doesn't have yet. Empty when this phone can't add one: only the athlete's
+    /// owner can, or anyone while the athlete isn't in the cloud.
+    func sportsToAdd(for id: UUID) -> [Sport] {
+        guard let athlete = profileData(id), athlete.access.map({ $0.role == .owner }) ?? true else { return [] }
+        let taken = Set(index.sportProfiles(of: id).map(\.sport))
+        return Sport.allCases.filter { !taken.contains($0) }
+    }
+
+    /// The name shown for a sport profile in lists: "Sam", or "Sam · Hockey" when Sam plays more than one sport here.
+    func listName(_ summary: ProfileSummary) -> String {
+        index.hasOtherSports(summary.id) ? summary.nameWithSport : summary.displayName
+    }
 
     func program(_ id: String) -> Program? { data.program(id: id) }
 
@@ -166,6 +183,25 @@ final class AppStore {
             saveIndex()
         }
         onLocalChange?(data.id)
+    }
+
+    /// Changes the athlete's name or class year on every one of their sport profiles on this phone, since it's the same
+    /// athlete.
+    func updateAthlete(_ change: (inout AthleteProfile) -> Void) {
+        update { change(&$0.profile) }
+        for sibling in index.sportProfiles(of: data.id) where sibling.id != data.id {
+            guard var other = try? library.loadProfile(sibling.id) else { continue }
+            change(&other.profile)
+            do {
+                try library.saveProfile(other)
+            } catch {
+                print("LaxPocket: could not save profile – \(error)")
+                continue
+            }
+            index.upsert(other.summary)
+            onLocalChange?(other.id)
+        }
+        saveIndex()
     }
 
     func addSession(_ session: TrainingSession) {

@@ -1,48 +1,28 @@
 import SwiftUI
 
-/// Vector paths for the LaxPocket mark, drawn in a 100 × 100 box:
-/// a field-lacrosse head with shooting strings, a short handle, and a growth arrow in the pocket.
+/// Vector paths for the SportsPocket mark, drawn in a 100 × 100 box: a stitched pocket holding a ball drawn as the
+/// weekly-goal ring. The same shapes as docs/app-icon.svg, which the app icons are made from.
 enum MarkPaths {
-    static let head: Path = {
+    static let stitch: Path = {
         var p = Path()
-        p.move(to: CGPoint(x: 26, y: 13))
-        p.addCurve(to: CGPoint(x: 74, y: 13), control1: CGPoint(x: 38, y: 17), control2: CGPoint(x: 62, y: 17))
-        p.addCurve(to: CGPoint(x: 80, y: 23), control1: CGPoint(x: 79, y: 12), control2: CGPoint(x: 81, y: 17))
-        p.addCurve(to: CGPoint(x: 71, y: 44), control1: CGPoint(x: 79, y: 31), control2: CGPoint(x: 76, y: 38))
-        p.addCurve(to: CGPoint(x: 61, y: 61), control1: CGPoint(x: 66, y: 50), control2: CGPoint(x: 63, y: 55))
-        p.addCurve(to: CGPoint(x: 56, y: 84), control1: CGPoint(x: 59, y: 68), control2: CGPoint(x: 57, y: 76))
-        p.addLine(to: CGPoint(x: 44, y: 84))
-        p.addCurve(to: CGPoint(x: 39, y: 61), control1: CGPoint(x: 43, y: 76), control2: CGPoint(x: 41, y: 68))
-        p.addCurve(to: CGPoint(x: 29, y: 44), control1: CGPoint(x: 37, y: 55), control2: CGPoint(x: 34, y: 50))
-        p.addCurve(to: CGPoint(x: 20, y: 23), control1: CGPoint(x: 24, y: 38), control2: CGPoint(x: 21, y: 31))
-        p.addCurve(to: CGPoint(x: 26, y: 13), control1: CGPoint(x: 19, y: 17), control2: CGPoint(x: 21, y: 12))
+        p.move(to: CGPoint(x: 23, y: 32))
+        p.addLine(to: CGPoint(x: 77, y: 32))
+        return p
+    }()
+
+    static let pocket: Path = {
+        var p = Path()
+        p.addLines([CGPoint(x: 18, y: 25), CGPoint(x: 82, y: 25), CGPoint(x: 79, y: 66), CGPoint(x: 50, y: 86), CGPoint(x: 21, y: 66)])
         p.closeSubpath()
         return p
     }()
 
-    static let strings: Path = {
-        var p = Path()
-        p.move(to: CGPoint(x: 23, y: 22))
-        p.addQuadCurve(to: CGPoint(x: 77, y: 22), control: CGPoint(x: 50, y: 27))
-        p.move(to: CGPoint(x: 24.5, y: 29))
-        p.addQuadCurve(to: CGPoint(x: 75.5, y: 29), control: CGPoint(x: 50, y: 34))
-        return p
-    }()
+    static let ring = Path(ellipseIn: CGRect(x: 36, y: 38, width: 28, height: 28))
 
-    static let handle: Path = {
+    /// Three quarters of the ring, clockwise from the top.
+    static let progress: Path = {
         var p = Path()
-        p.move(to: CGPoint(x: 50, y: 84))
-        p.addLine(to: CGPoint(x: 50, y: 97))
-        return p
-    }()
-
-    static let arrow: Path = {
-        var p = Path()
-        p.move(to: CGPoint(x: 50, y: 72))
-        p.addLine(to: CGPoint(x: 50, y: 40))
-        p.move(to: CGPoint(x: 41.5, y: 48.5))
-        p.addLine(to: CGPoint(x: 50, y: 40))
-        p.addLine(to: CGPoint(x: 58.5, y: 48.5))
+        p.addArc(center: CGPoint(x: 50, y: 52), radius: 14, startAngle: .degrees(-90), endAngle: .degrees(180), clockwise: false)
         return p
     }()
 }
@@ -56,34 +36,34 @@ struct LaxPocketMark: View {
     }
 
     var frameColor: Color = .white
-    var arrowColor: Color
+    var accentColor: Color
     var style: Style = .inline
 
     var body: some View {
         Canvas { context, size in
             let box: CGRect
-            let widths: (strings: CGFloat, head: CGFloat, handle: CGFloat, arrow: CGFloat)
+            let widths: (stitch: CGFloat, pocket: CGFloat, ring: CGFloat)
             switch style {
             case .inline:
-                box = CGRect(x: 14, y: 8, width: 72, height: 92)
-                widths = (4, 7, 8, 8)
+                box = CGRect(x: 14, y: 20, width: 72, height: 72)
+                widths = (3.5, 7, 7)
             case .icon:
                 box = CGRect(x: 50 - 59.52, y: 50 - 59.52, width: 119.05, height: 119.05)
-                widths = (2.6, 6, 7, 7)
+                widths = (2.6, 6, 6)
             }
             let scale: CGFloat = min(size.width / box.width, size.height / box.height)
             let dx: CGFloat = size.width / 2 - box.midX * scale
             let dy: CGFloat = size.height / 2 - box.midY * scale
             let transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
 
-            context.stroke(MarkPaths.strings.applying(transform), with: .color(frameColor.opacity(0.7)),
-                           style: StrokeStyle(lineWidth: widths.strings * scale))
-            context.stroke(MarkPaths.head.applying(transform), with: .color(frameColor),
-                           style: StrokeStyle(lineWidth: widths.head * scale, lineJoin: .round))
-            context.stroke(MarkPaths.handle.applying(transform), with: .color(frameColor),
-                           style: StrokeStyle(lineWidth: widths.handle * scale, lineCap: .round))
-            context.stroke(MarkPaths.arrow.applying(transform), with: .color(arrowColor),
-                           style: StrokeStyle(lineWidth: widths.arrow * scale, lineCap: .round, lineJoin: .round))
+            context.stroke(MarkPaths.stitch.applying(transform), with: .color(frameColor.opacity(0.7)),
+                           style: StrokeStyle(lineWidth: widths.stitch * scale, lineCap: .round, dash: [4 * scale, 4 * scale]))
+            context.stroke(MarkPaths.pocket.applying(transform), with: .color(frameColor),
+                           style: StrokeStyle(lineWidth: widths.pocket * scale, lineJoin: .round))
+            context.stroke(MarkPaths.ring.applying(transform), with: .color(frameColor.opacity(0.35)),
+                           style: StrokeStyle(lineWidth: widths.ring * scale))
+            context.stroke(MarkPaths.progress.applying(transform), with: .color(accentColor),
+                           style: StrokeStyle(lineWidth: widths.ring * scale, lineCap: .round))
         }
         .accessibilityHidden(true)
     }
@@ -97,25 +77,25 @@ struct AppIconPreview: View {
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.2237, style: .continuous)
             .fill(theme.primary)
-            .overlay(LaxPocketMark(frameColor: .white, arrowColor: theme.iconAccent, style: .icon))
+            .overlay(LaxPocketMark(frameColor: .white, accentColor: theme.iconAccent, style: .icon))
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
 }
 
-/// "LaxPocket" with the mark, for coloured headers.
+/// "SportsPocket" with the mark, for coloured headers.
 struct Wordmark: View {
     let theme: AppTheme
     var size: CGFloat = 23
 
     var body: some View {
         HStack(spacing: 8) {
-            LaxPocketMark(frameColor: .white, arrowColor: theme.iconAccent)
-                .frame(width: size * 0.95, height: size * 1.2)
-            (Text("Lax").foregroundColor(theme.onPrimary) + Text("Pocket").foregroundColor(.white))
+            LaxPocketMark(frameColor: .white, accentColor: theme.iconAccent)
+                .frame(width: size * 1.05, height: size * 1.05)
+            (Text("Sports").foregroundColor(theme.onPrimary) + Text("Pocket").foregroundColor(.white))
                 .font(.display(size))
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("LaxPocket")
+        .accessibilityLabel("SportsPocket")
     }
 }

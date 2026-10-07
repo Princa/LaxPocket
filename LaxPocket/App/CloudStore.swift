@@ -210,8 +210,10 @@ final class CloudStore {
             let cloud = CloudSync(client: client)
             var firstError: Error?
             // One athlete failing (say, one with an edit the cloud refuses) doesn’t hold up the rest.
-            // The demo athlete (debug builds) stays on this iPhone.
-            for summary in appStore.profiles where summary.id != DemoSeason.profileID && !noLongerShared.contains(summary.id) {
+            // The demo athlete (debug builds) stays on this iPhone. An athlete's first profile goes up before the sports
+            // added to it, which the cloud checks against it.
+            let ordered = appStore.profiles.filter { $0.athleteID == nil } + appStore.profiles.filter { $0.athleteID != nil }
+            for summary in ordered where !summary.isDemo && !noLongerShared.contains(summary.id) {
                 do {
                     try await sync(summary.id, using: cloud)
                 } catch {
@@ -247,7 +249,17 @@ final class CloudStore {
 
     private func sync(_ id: UUID, using cloud: CloudSync) async throws {
         guard let captured = appStore.profileData(id) else { return }
-        let merged = try await cloud.sync(local: captured, base: appStore.library.loadSyncBase(id))
+        let base = appStore.library.loadSyncBase(id)
+        var merged = try await cloud.sync(local: captured, base: base)
+        // A sport just added for an athlete gets the family on the athlete's other sports.
+        if base == nil, merged.profile.athleteID != nil, merged.access?.role == .owner {
+            do {
+                try await cloud.addFamilyToSport(profileID: id)
+                merged.access = try await cloud.snapshot(profileID: id)?.access ?? merged.access
+            } catch {
+                print("LaxPocket: could not bring the family to \(captured.summary.nameWithSport) – \(error)")
+            }
+        }
 
         // The profile may have been edited or removed while the sync was running.
         guard appStore.profiles.contains(where: { $0.id == id }), let current = appStore.profileData(id) else { return }
@@ -341,27 +353,36 @@ final class CloudStore {
         try await CloudSync(client: client).cancelInvite(code: code)
     }
 
-    /// Takes someone off an athlete (owner only).
+    /// Takes someone off an athlete (owner only). Family comes off every sport.
     func remove(_ userID: UUID, from id: UUID) async throws {
         guard let client else { return }
         try await CloudSync(client: client).removeMember(profileID: id, userID: userID)
     }
 
-    /// Takes this account off an athlete it doesn't own, and the athlete off this iPhone.
+    /// Takes this account off an athlete it doesn't own, and the athlete off this iPhone. Family leaves every sport.
     func leave(_ id: UUID) async throws {
         guard let client, let userID = session?.userID else { return }
-        try await CloudSync(client: client).removeMember(profileID: id, userID: userID)
-        removeFromThisPhone(id)
+        let removed = try await CloudSync(client: client).removeMember(profileID: id, userID: userID)
+        for profileID in Set(removed + [id]) where appStore.profiles.contains(where: { $0.id == profileID }) {
+            removeFromThisPhone(profileID)
+        }
     }
 
-    /// Joins an athlete with an invite code, brings them onto this iPhone and switches to them.
+    /// Joins an athlete with an invite code, brings them onto this iPhone, every sport a parent or the athlete is
+    /// given, and switches to them.
     func join(code: String) async throws {
         guard let client else { throw CloudError.notSignedIn }
         let cloud = CloudSync(client: client)
         let id = try await cloud.acceptInvite(code: code)
         noLongerShared.remove(id)
         try await download(id, using: cloud)
-        remoteOnly.removeAll { $0.id == id }
+        let key = appStore.profileData(id)?.athleteKey ?? id
+        let local = Set(appStore.profiles.map(\.id))
+        for row in try await cloud.profiles() where row.athleteKey == key && !local.contains(row.id) {
+            noLongerShared.remove(row.id)
+            try await download(row.id, using: cloud)
+        }
+        remoteOnly.removeAll { $0.athleteKey == key }
         appStore.switchProfile(to: id)
     }
 
@@ -405,15 +426,15 @@ final class CloudStore {
         #endif
         guard let client else { throw CloudError.notSignedIn }
         let workspace = try await CloudSync(client: client).coachWorkspace()
-        rosters = workspace.map { RosterRow(id: $0.id, kind: $0.kind, name: $0.name, joinCode: $0.joinCode) }
+        rosters = workspace.map { RosterRow(id: $0.id, kind: $0.kind, name: $0.name, joinCode: $0.joinCode, sport: $0.sport) }
         return workspace
     }
 
-    func createRoster(name: String, kind: RosterKind) async throws {
+    func createRoster(name: String, kind: RosterKind, sport: Sport) async throws {
         try refuseDemoChanges()
         guard let client else { throw CloudError.notSignedIn }
         let cloud = CloudSync(client: client)
-        _ = try await cloud.createRoster(name: name, kind: kind)
+        _ = try await cloud.createRoster(name: name, kind: kind, sport: sport)
         rosters = try await cloud.rosters()
     }
 
@@ -457,7 +478,7 @@ final class CloudStore {
         rosters.removeAll { $0.id == id }
     }
 
-    /// Lets another LaxPocket account see (or also edit) an athlete.
+    /// Lets another SportsPocket account see (or also edit) an athlete.
     func share(_ id: UUID, with email: String, canEdit: Bool) async throws {
         guard let client else { return }
         // The athlete has to be in the cloud before it can be shared.

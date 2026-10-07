@@ -15,9 +15,21 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var bodyUnits: BodyUnits
     /// Canadian dollars per US dollar, for expenses paid in US dollars and for showing the budget in US dollars.
     public var usdToCAD: Double
+    /// The sport this profile is for. Set when the profile is made and never changed.
+    public var sport: Sport
+    /// The athlete's first sport profile, for a profile added for another sport; nil for the first one. Groups an
+    /// athlete's sport profiles, and the family on them.
+    public var athleteID: UUID?
+    /// Hockey: which way they shoot.
+    public var shoots: Handedness?
+    /// Hockey: a goalie, so goalie focus tags (and later the goalie stat sheet) by default.
+    public var playsGoal: Bool
+    /// Hockey: age group and tier, e.g. "U15 AA".
+    public var level: String
 
     public init(firstName: String, classYear: Int?, positions: String, benchmarkGroup: BenchmarkGroup? = nil, mentalCoachName: String = "", weeklyGoalHours: Double = 12, season: String,
-                bodyUnits: BodyUnits = .imperial, usdToCAD: Double = ExchangeRate.defaultUSDToCAD) {
+                bodyUnits: BodyUnits = .imperial, usdToCAD: Double = ExchangeRate.defaultUSDToCAD, sport: Sport = .lacrosse, athleteID: UUID? = nil,
+                shoots: Handedness? = nil, playsGoal: Bool = false, level: String = "") {
         self.firstName = firstName
         self.classYear = classYear
         self.positions = positions
@@ -27,14 +39,20 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         self.season = season
         self.bodyUnits = bodyUnits
         self.usdToCAD = usdToCAD
+        self.sport = sport
+        self.athleteID = athleteID
+        self.shoots = shoots
+        self.playsGoal = playsGoal
+        self.level = level
     }
 
     private enum CodingKeys: String, CodingKey {
         case firstName, classYear, positions, benchmarkGroup, mentalCoachName, weeklyGoalHours, season, bodyUnits, usdToCAD
+        case sport, athleteID, shoots, playsGoal, level
     }
 
-    /// Profiles saved before height and weight tracking have no `bodyUnits`, and those saved before currencies have no
-    /// `usdToCAD`.
+    /// Profiles saved before height and weight tracking have no `bodyUnits`, those saved before currencies have no
+    /// `usdToCAD`, and those saved before hockey are lacrosse.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         firstName = try c.decode(String.self, forKey: .firstName)
@@ -46,6 +64,16 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         season = try c.decode(String.self, forKey: .season)
         bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
         usdToCAD = try c.decodeIfPresent(Double.self, forKey: .usdToCAD) ?? ExchangeRate.defaultUSDToCAD
+        sport = try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse
+        athleteID = try c.decodeIfPresent(UUID.self, forKey: .athleteID)
+        shoots = try c.decodeIfPresent(Handedness.self, forKey: .shoots)
+        playsGoal = try c.decodeIfPresent(Bool.self, forKey: .playsGoal) ?? false
+        level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
+    }
+
+    /// Focus tags for a team or skills session in this profile's sport.
+    public var focusOptions: [String] {
+        sport.focusOptions(playsGoal: playsGoal)
     }
 
     /// "Olivia's Season" style title.
@@ -84,7 +112,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
 }
 
 /// Everything stored for one athlete profile, saved as its own JSON file on the device.
-public struct AppData: Codable, Equatable, Sendable {
+public struct AppData: Codable, Equatable, Identifiable, Sendable {
     /// 1: single season file with a sample season. 2: one file per athlete profile.
     public static let currentSchemaVersion = 2
 
@@ -204,9 +232,9 @@ public struct AppData: Codable, Equatable, Sendable {
         profile: AthleteProfile(firstName: "", classYear: nil, positions: "", season: AthleteProfile.seasonLabel(for: Date()))
     )
 
-    /// Name and theme, for the profile list.
+    /// Name, theme and sport, for the profile list.
     public var summary: ProfileSummary {
-        ProfileSummary(id: id, name: profile.firstName, themeID: themeID)
+        ProfileSummary(id: id, name: profile.firstName, themeID: themeID, sport: profile.sport, athleteID: profile.athleteID)
     }
 
     public func program(id: String) -> Program? {

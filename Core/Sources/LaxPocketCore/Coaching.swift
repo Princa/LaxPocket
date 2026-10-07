@@ -23,11 +23,18 @@ public enum RosterKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// What the family is told the coach will see, before adding the athlete.
-    public var sharingSummary: String {
+    /// What the family is told the coach will see of a lacrosse athlete, before adding them.
+    public var sharingSummary: String { sharingSummary(for: .lacrosse) }
+
+    /// What the family is told the coach will see, before adding the athlete. Only the athlete's profile for the roster's
+    /// sport, never their other sports.
+    public func sharingSummary(for sport: Sport) -> String {
         switch self {
-        case .team: return "Training, wall ball, combine results and events, including reflections. Not mental sessions, mental-game documents, height and weight, or the budget."
-        case .mental: return "Training, events and the mental game: mental sessions and shared documents. Not height and weight or the budget."
+        case .team:
+            let training = sport.hasWallball ? "Training, wall ball, combine results" : "Training, testing"
+            return "\(training) and events, including reflections. Not mental sessions, mental-game documents, height and weight, the budget, or other sports."
+        case .mental:
+            return "Training, events and the mental game: mental sessions and shared documents. Not height and weight, the budget, or other sports."
         }
     }
 }
@@ -37,6 +44,8 @@ public struct CoachRoster: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
     public var kind: RosterKind
+    /// Only athletes' profiles for this sport can join.
+    public var sport: Sport
     /// What families enter to add their athlete. Nil when the roster is closed to new athletes.
     public var joinCode: String?
     /// By name.
@@ -44,10 +53,12 @@ public struct CoachRoster: Identifiable, Equatable, Sendable {
     /// Tasks given on this roster, to everyone or to one athlete. Newest first.
     public var assignments: [Assignment]
 
-    public init(id: UUID, name: String, kind: RosterKind, joinCode: String?, athletes: [CoachAthlete], assignments: [Assignment] = []) {
+    public init(id: UUID, name: String, kind: RosterKind, sport: Sport = .lacrosse, joinCode: String?, athletes: [CoachAthlete],
+                assignments: [Assignment] = []) {
         self.id = id
         self.name = name
         self.kind = kind
+        self.sport = sport
         self.joinCode = joinCode
         self.athletes = athletes
         self.assignments = assignments

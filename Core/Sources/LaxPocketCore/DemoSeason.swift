@@ -21,6 +21,16 @@ public enum DemoSeason {
     }
 }
 
+extension ProfileSummary {
+    /// The demo athlete, in any sport added for them. It stays on this phone and never syncs.
+    public var isDemo: Bool { athleteKey == DemoSeason.profileID }
+}
+
+extension AppData {
+    /// See `ProfileSummary.isDemo`.
+    public var isDemo: Bool { athleteKey == DemoSeason.profileID }
+}
+
 /// SplitMix64: a small seeded generator, so the demo is the same every time for the same day.
 struct SeededGenerator: RandomNumberGenerator {
     private var state: UInt64

@@ -70,7 +70,7 @@ struct CloudSyncView: View {
             SecureField("Password", text: $password)
                 .textContentType(.password)
         } header: {
-            Text("LaxPocket account")
+            Text("SportsPocket account")
         } footer: {
             Text("Back up every athlete on this iPhone and keep them in sync across phones. Sign in with the same account on each phone, or share an athlete with another account.")
         }
@@ -97,7 +97,7 @@ struct CloudSyncView: View {
                 run {
                     if try await cloud.signUp(email: email, password: password) {
                         awaitingConfirmation = true
-                        message = "Check \(email) for a confirmation link and open it on this iPhone. LaxPocket opens and signs you in."
+                        message = "Check \(email) for a confirmation link and open it on this iPhone. SportsPocket opens and signs you in."
                     }
                 }
             }
@@ -170,7 +170,10 @@ struct CloudSyncView: View {
                 ForEach(cloud.remoteOnly, id: \.id) { row in
                     HStack {
                         ProfileAvatar(summary: ProfileSummary(id: row.id, name: row.firstName, themeID: row.themeID), size: 32)
-                        Text(row.firstName.isEmpty ? "Unnamed athlete" : row.firstName)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.firstName.isEmpty ? "Unnamed athlete" : row.firstName)
+                            Text(row.sport.title).font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                        }
                         Spacer()
                         Button("Download") { Task { await cloud.download(row.id) } }
                             .buttonStyle(.borderless)
@@ -187,7 +190,7 @@ struct CloudSyncView: View {
         }
 
         Section {
-            if store.hasProfile && store.data.id != DemoSeason.profileID {
+            if store.hasProfile && !store.data.isDemo {
                 NavigationLink { PeopleView(summary: store.data.summary) } label: {
                     Label("People on \(store.data.summary.displayName)", systemImage: "person.2")
                 }
@@ -195,7 +198,7 @@ struct CloudSyncView: View {
             Button { showJoin = true } label: {
                 Label("Join with a code", systemImage: "number")
             }
-            if store.hasProfile && store.data.id != DemoSeason.profileID && (store.data.access?.canManagePeople ?? true) {
+            if store.hasProfile && !store.data.isDemo && (store.data.access?.canManagePeople ?? true) {
                 Button { showShare = true } label: {
                     Label("Share \(store.data.summary.displayName) by email", systemImage: "envelope")
                 }
@@ -231,7 +234,7 @@ struct CloudSyncView: View {
     }
 }
 
-/// Gives another LaxPocket account access to one athlete.
+/// Gives another SportsPocket account access to one athlete.
 struct ShareAthleteView: View {
     @Environment(CloudStore.self) private var cloud
     @Environment(\.dismiss) private var dismiss

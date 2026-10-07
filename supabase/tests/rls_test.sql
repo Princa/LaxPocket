@@ -2,7 +2,8 @@
 -- Run with supabase/tests/run-local.sh. Any failed assert stops the run.
 --
 -- Accounts: A owns a profile, B is a second family member, C is a stranger. D (the athlete's own login) and E (a coach)
--- join in the family accounts section, F (a team coach) and G (a mental coach) in the rosters section.
+-- join in the family accounts section, F (a team coach) and G (a mental coach) in the rosters section, and H (another
+-- parent) in the sport profiles section.
 
 \set ON_ERROR_STOP 1
 
@@ -1416,6 +1417,219 @@ begin
   end;
 end
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Sport profiles: A adds hockey for Sam. The family comes along to every sport; coaches stay with one sport.
+-- H is another parent.
+-- ---------------------------------------------------------------------------
+reset role;
+insert into auth.users (id, email) values ('00000000-0000-4000-8000-000000000011', 'h@example.com');
+
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+insert into public.profiles (id, first_name, sport, athlete_id, shoots, level)
+values ('10000000-0000-4000-8000-000000000005', 'Sam', 'hockey', '10000000-0000-4000-8000-000000000001', 'left', 'U15 AA');
+do $$
+declare failed boolean := false;
+begin
+  assert (select sport = 'hockey' and athlete_id = '10000000-0000-4000-8000-000000000001' and shoots = 'left' and level = 'U15 AA'
+          from public.profiles where id = '10000000-0000-4000-8000-000000000005'), 'A adds hockey for Sam';
+  assert (select sport = 'lacrosse' and athlete_id is null from public.profiles where id = '10000000-0000-4000-8000-000000000001'),
+    'profiles made before hockey are lacrosse, and the athlete''s first profile';
+  begin
+    insert into public.profiles (first_name, sport, athlete_id) values ('Sam', 'hockey', '10000000-0000-4000-8000-000000000001');
+  exception when unique_violation then failed := true;
+  end;
+  assert failed, 'an athlete has one profile per sport';
+  failed := false;
+  begin
+    insert into public.profiles (first_name, sport) values ('Sam', 'cricket');
+  exception when check_violation then failed := true;
+  end;
+  assert failed, 'only known sports';
+end
+$$;
+
+-- The sport and the athlete stay as they were made, including through the upsert the app sends.
+update public.profiles set sport = 'lacrosse', athlete_id = null where id = '10000000-0000-4000-8000-000000000005';
+insert into public.profiles (id, first_name, sport, athlete_id) values ('10000000-0000-4000-8000-000000000005', 'Sam', 'lacrosse', null)
+on conflict (id) do update set first_name = excluded.first_name, sport = excluded.sport, athlete_id = excluded.athlete_id;
+do $$
+begin
+  assert (select sport = 'hockey' and athlete_id = '10000000-0000-4000-8000-000000000001'
+          from public.profiles where id = '10000000-0000-4000-8000-000000000005'), 'a profile''s sport and athlete never change';
+end
+$$;
+
+-- Only the athlete's owner adds a sport for them, or brings the family along.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000c';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    insert into public.profiles (first_name, sport, athlete_id) values ('Not Sam', 'hockey', '10000000-0000-4000-8000-000000000001');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'a stranger can''t add a sport to someone else''s athlete';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000b';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert (select count(*) from public.profiles where id = '10000000-0000-4000-8000-000000000005') = 0,
+    'nobody else sees the new sport before the family is brought along';
+  begin
+    perform public.add_family_to_sport('10000000-0000-4000-8000-000000000005');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only the owner brings the family along';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+begin
+  assert public.add_family_to_sport('10000000-0000-4000-8000-000000000005') =
+    (select count(*) from public.profile_members m where m.profile_id = '10000000-0000-4000-8000-000000000001'
+       and m.user_id <> '00000000-0000-4000-8000-00000000000a' and m.relationships && array['parent', 'athlete']),
+    'every parent and the athlete''s login come along';
+  assert not exists (
+    select 1 from public.profile_members m where m.profile_id = '10000000-0000-4000-8000-000000000005'
+      and not (m.relationships <@ array['parent', 'athlete'])), 'coaches don''t';
+  assert exists (select 1 from public.profile_members m where m.profile_id = '10000000-0000-4000-8000-000000000005'
+                   and m.user_id = '00000000-0000-4000-8000-00000000000b'), 'B is on hockey';
+  perform public.add_family_to_sport('10000000-0000-4000-8000-000000000005');
+  assert (select role from public.profile_members where profile_id = '10000000-0000-4000-8000-000000000005'
+            and user_id = '00000000-0000-4000-8000-00000000000a') = 'owner', 'bringing them again changes nothing';
+end
+$$;
+
+-- B, a parent, can save the hockey profile: the upsert doesn't count as adding a sport.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000b';
+set role authenticated;
+insert into public.profiles (id, first_name, level) values ('10000000-0000-4000-8000-000000000005', 'Sam', 'U15 AAA')
+on conflict (id) do update set first_name = excluded.first_name, level = excluded.level;
+do $$
+begin
+  assert (select relationships && array['parent'] from public.my_profile_access
+          where profile_id = '10000000-0000-4000-8000-000000000005'), 'B is a parent on hockey too';
+  assert (select level from public.profiles where id = '10000000-0000-4000-8000-000000000005') = 'U15 AAA', 'B saves the hockey profile';
+end
+$$;
+
+-- A new parent invited on lacrosse is on hockey too, and leaving takes them off both.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$ begin perform set_config('test.h_code', public.create_profile_invite('10000000-0000-4000-8000-000000000001', 'parent'), false); end $$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000011';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  assert public.accept_profile_invite(current_setting('test.h_code')) = '10000000-0000-4000-8000-000000000001', 'H joins Sam';
+  assert (select count(*) from public.my_profile_access where role = 'editor' and relationships = '{parent}') = 2,
+    'and is a parent on both of Sam''s sports';
+  begin
+    perform public.remove_from_athlete('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000000b');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'only the owner removes someone else';
+  assert (select count(*) from public.remove_from_athlete('10000000-0000-4000-8000-000000000005',
+                                                          '00000000-0000-4000-8000-000000000011')) = 2,
+    'leaving takes H off every sport';
+  assert (select count(*) from public.my_profile_access) = 0, 'H is on nothing now';
+end
+$$;
+
+-- Sharing the old way shares every sport the owner owns, and the owner takes a parent off every sport.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  perform public.share_profile('10000000-0000-4000-8000-000000000001', 'h@example.com', 'editor');
+  assert (select count(*) from public.profile_members where user_id = '00000000-0000-4000-8000-000000000011') = 2,
+    'sharing Sam shares hockey too';
+  assert (select count(*) from public.remove_from_athlete('10000000-0000-4000-8000-000000000001',
+                                                          '00000000-0000-4000-8000-000000000011')) = 2,
+    'the owner takes a parent off every sport';
+  begin
+    perform public.remove_from_athlete('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-00000000000a');
+  exception when insufficient_privilege then failed := true;
+  end;
+  assert failed, 'the owner can''t leave';
+end
+$$;
+
+-- A hockey team: only Sam's hockey profile can join, and the coach sees nothing of lacrosse.
+insert into public.programs (profile_id, id, name, program_group, session_category)
+values ('10000000-0000-4000-8000-000000000005', 'kings', 'Jr. Kings U15 AA', 'teams', 'team');
+insert into public.training_sessions (profile_id, program_id, started_at, category, minutes, effort, focus)
+values ('10000000-0000-4000-8000-000000000005', 'kings', '2026-09-30T18:00:00Z', 'team', 75, 7, '{Skating,Faceoffs}');
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$
+begin
+  perform set_config('test.hockey_roster', public.create_roster('U15 AA', 'team', 'hockey')::text, false);
+  perform set_config('test.hockey_code', (select join_code from public.rosters where sport = 'hockey'), false);
+  assert (select sport from public.rosters where id = current_setting('test.team_roster')::uuid) = 'lacrosse',
+    'rosters made before hockey are lacrosse';
+  assert public.describe_code(current_setting('test.hockey_code')) ->> 'sport' = 'hockey', 'a roster''s code says its sport';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+do $$
+declare failed boolean := false;
+begin
+  begin
+    perform public.join_roster(current_setting('test.hockey_code'), '10000000-0000-4000-8000-000000000001');
+  exception when invalid_parameter_value then failed := true;
+  end;
+  assert failed, 'a lacrosse profile can''t join a hockey team';
+  assert public.join_roster(current_setting('test.hockey_code'), '10000000-0000-4000-8000-000000000005')
+    = current_setting('test.hockey_roster')::uuid, 'Sam''s hockey profile joins';
+end
+$$;
+
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000f';
+set role authenticated;
+do $$
+begin
+  assert (select array_agg(sport || ':' || level) from public.roster_athlete_profiles) = '{hockey:U15 AAA}',
+    'the coach sees Sam''s hockey profile';
+  assert (select count(*) from public.training_sessions where profile_id = '10000000-0000-4000-8000-000000000005') = 1,
+    'and hockey training';
+  assert (select count(*) from public.training_sessions where profile_id = '10000000-0000-4000-8000-000000000001') = 0,
+    'and nothing of lacrosse';
+  assert (select count(*) from public.season_events where profile_id = '10000000-0000-4000-8000-000000000001') = 0,
+    'not even lacrosse games';
+end
+$$;
+
+-- Put things back for the checks below: hockey goes.
+reset role;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-00000000000a';
+set role authenticated;
+delete from public.profiles where id = '10000000-0000-4000-8000-000000000005';
 
 -- ---------------------------------------------------------------------------
 -- Deleting a profile removes everything under it

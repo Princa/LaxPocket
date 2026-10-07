@@ -104,7 +104,7 @@ struct AssignmentEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Title, e.g. Left-hand wall ball", text: $title)
+                    TextField(roster.sport.hasWallball ? "Title, e.g. Left-hand wall ball" : "Title, e.g. Edge work", text: $title)
                     TextField("Notes for the athlete (optional)", text: $notes, axis: .vertical).lineLimit(2...5)
                     Picker("For", selection: $athleteID) {
                         Text("Everyone on \(roster.name)").tag(UUID?.none)
@@ -114,7 +114,7 @@ struct AssignmentEditorView: View {
 
                 Section {
                     Picker("Kind", selection: $kind) {
-                        ForEach(AssignmentKind.allCases) { Text($0.title).tag($0) }
+                        ForEach(AssignmentKind.available(for: roster.sport)) { Text($0.title).tag($0) }
                     }
                     switch kind {
                     case .wallball:
@@ -168,6 +168,7 @@ struct AssignmentEditorView: View {
     }
 
     private func load() {
+        if existing == nil, !AssignmentKind.available(for: roster.sport).contains(kind) { kind = .training }
         guard let a = existing, title.isEmpty else { return }
         title = a.title
         notes = a.notes

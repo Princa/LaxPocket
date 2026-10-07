@@ -370,4 +370,60 @@ final class CloudSyncIntegrationTests: XCTestCase {
         XCTAssertNil(unlinked)
         try await parent.deleteProfile(season.id)
     }
+
+    func testHockeyIsItsOwnProfileWithTheSameFamily() async throws {
+        let lacrosse = Fixtures.season(name: "E2E two sports \(UUID().uuidString.prefix(6))")
+        let owner = await sync(tokenA)
+        let other = await sync(tokenB)
+        let otherID = try userID(tokenB)
+        _ = try await owner.sync(local: lacrosse, base: nil)
+        let code = try await owner.createInvite(profileID: lacrosse.id, relationship: .parent)
+        _ = try await other.acceptInvite(code: code)
+
+        // 1. The owner adds hockey: its own profile, with the same family.
+        var hockey = lacrosse.addingSport(.hockey)
+        hockey.profile.shoots = .left
+        hockey.programs = [Program(id: "kings", name: "Jr. Kings U15 AA", detail: "", group: .teams, sessionCategory: .team, monogram: "JK")]
+        hockey.sessions = [TrainingSession(date: Fixtures.day(1), programID: "kings", category: .team, minutes: 75, effort: 7, focus: ["Faceoffs"])]
+        let uploaded = try await owner.sync(local: hockey, base: nil)
+        XCTAssertEqual(uploaded.profile.sport, .hockey)
+        XCTAssertEqual(uploaded.profile.athleteKey, lacrosse.id)
+        let added = try await owner.addFamilyToSport(profileID: hockey.id)
+        XCTAssertEqual(added, 1, "the other parent comes along")
+
+        let theirs = try await other.profiles()
+        XCTAssertEqual(Set(theirs.filter { $0.athleteKey == lacrosse.id }.map(\.sport)), [.lacrosse, .hockey])
+        let theirSnapshot = try await other.snapshot(profileID: hockey.id)
+        let theirHockey = try XCTUnwrap(theirSnapshot)
+        XCTAssertEqual(theirHockey.access, ProfileAccess(role: .editor, relationships: [.parent]))
+        XCTAssertEqual(theirHockey.appData.sessions.map(\.focus), [["Faceoffs"]])
+        XCTAssertEqual(theirHockey.appData.profile.shoots, .left)
+        XCTAssertTrue(theirHockey.appData.wallballSessions.isEmpty, "nothing comes over from lacrosse")
+
+        // 2. A hockey roster only takes the hockey profile.
+        let rosterID = try await other.createRoster(name: "E2E U15 AA", kind: .team, sport: .hockey)
+        let made = try await other.rosters()
+        let rosterCode = try XCTUnwrap(made.first { $0.id == rosterID }?.joinCode)
+        let info = try await owner.describeCode(rosterCode)
+        guard case .roster("E2E U15 AA", .team, _, let sport) = info else { return XCTFail("\(info)") }
+        XCTAssertEqual(sport, .hockey, "a roster's code says its sport")
+        do {
+            _ = try await owner.joinRoster(code: rosterCode, profileID: lacrosse.id)
+            XCTFail("a lacrosse profile can't join a hockey roster")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("hockey"), error.localizedDescription)
+        }
+        let joined = try await owner.joinRoster(code: rosterCode, profileID: hockey.id)
+        XCTAssertEqual(joined, rosterID)
+
+        // 3. The other parent leaves from hockey and is off both sports.
+        let left = try await other.removeMember(profileID: hockey.id, userID: otherID)
+        XCTAssertEqual(Set(left), [lacrosse.id, hockey.id])
+        let afterLeaving = try await other.profiles()
+        XCTAssertFalse(afterLeaving.contains { $0.athleteKey == lacrosse.id })
+
+        try await other.deleteRoster(rosterID)
+        try await owner.deleteProfile(hockey.id)
+        try await owner.deleteProfile(lacrosse.id)
+    }
 }

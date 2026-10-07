@@ -18,6 +18,11 @@ public enum AssignmentKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .check: return "Tick off"
         }
     }
+
+    /// The kinds a coach can give on a roster for this sport: wall ball only where the sport has it.
+    public static func available(for sport: Sport) -> [AssignmentKind] {
+        allCases.filter { $0 != .wallball || sport.hasWallball }
+    }
 }
 
 /// How often a task comes round. Matches `assignments.schedule`.

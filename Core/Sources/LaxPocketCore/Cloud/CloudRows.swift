@@ -18,7 +18,8 @@ public protocol CloudRow: Codable, Hashable, Sendable {
 public struct ProfileRow: CloudRow {
     public static let table = "profiles"
     public static let columns = ["id", "first_name", "class_year", "positions", "benchmark_group", "mental_coach_name",
-                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units", "usd_to_cad"]
+                                 "weekly_goal_hours", "season_label", "season_budget", "theme_id", "body_units", "usd_to_cad",
+                                 "sport", "athlete_id", "shoots", "plays_goal", "level"]
     public static let conflictColumns = ["id"]
 
     public var id: UUID
@@ -34,18 +35,25 @@ public struct ProfileRow: CloudRow {
     public var themeID: String
     public var bodyUnits: BodyUnits
     public var usdToCAD: Double
+    /// Fixed once the profile is in the cloud.
+    public var sport: Sport = .lacrosse
+    public var athleteID: UUID?
+    public var shoots: Handedness?
+    public var playsGoal: Bool = false
+    public var level: String = ""
 
     enum CodingKeys: String, CodingKey {
-        case id, positions
+        case id, positions, sport, shoots, level
         case firstName = "first_name", classYear = "class_year", benchmarkGroup = "benchmark_group"
         case mentalCoachName = "mental_coach_name", weeklyGoalHours = "weekly_goal_hours", seasonLabel = "season_label"
         case seasonBudget = "season_budget", themeID = "theme_id", bodyUnits = "body_units", usdToCAD = "usd_to_cad"
+        case athleteID = "athlete_id", playsGoal = "plays_goal"
     }
 }
 
 extension ProfileRow {
-    /// Sync records saved before height and weight tracking have no `body_units`, and those saved before currencies
-    /// have no `usd_to_cad`.
+    /// Sync records saved before height and weight tracking have no `body_units`, those saved before currencies
+    /// have no `usd_to_cad`, and those saved before hockey are lacrosse.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -60,7 +68,15 @@ extension ProfileRow {
         themeID = try c.decode(String.self, forKey: .themeID)
         bodyUnits = try c.decodeIfPresent(BodyUnits.self, forKey: .bodyUnits) ?? .imperial
         usdToCAD = try c.decodeIfPresent(Double.self, forKey: .usdToCAD) ?? ExchangeRate.defaultUSDToCAD
+        sport = try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse
+        athleteID = try c.decodeIfPresent(UUID.self, forKey: .athleteID)
+        shoots = try c.decodeIfPresent(Handedness.self, forKey: .shoots)
+        playsGoal = try c.decodeIfPresent(Bool.self, forKey: .playsGoal) ?? false
+        level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
     }
+
+    /// The same for every sport profile of one athlete.
+    public var athleteKey: UUID { athleteID ?? id }
 }
 
 public struct ProgramRow: CloudRow {
@@ -752,7 +768,15 @@ extension ProfileRow {
         themeID = data.themeID
         bodyUnits = p.bodyUnits
         usdToCAD = ExchangeRate.normalized(p.usdToCAD)
+        sport = p.sport
+        athleteID = p.athleteID == data.id ? nil : p.athleteID
+        shoots = p.sport == .hockey ? p.shoots : nil
+        playsGoal = p.sport == .hockey && p.playsGoal
+        level = String(p.level.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ProfileRow.levelLength))
     }
+
+    /// Longest level the database takes.
+    static let levelLength = 40
 }
 
 extension BodyMeasurementRow {
@@ -902,7 +926,8 @@ extension ProfileSnapshot {
         let p = profile
         let athlete = AthleteProfile(firstName: p.firstName, classYear: p.classYear, positions: p.positions, benchmarkGroup: p.benchmarkGroup,
                                      mentalCoachName: p.mentalCoachName, weeklyGoalHours: p.weeklyGoalHours, season: p.seasonLabel,
-                                     bodyUnits: p.bodyUnits, usdToCAD: p.usdToCAD)
+                                     bodyUnits: p.bodyUnits, usdToCAD: p.usdToCAD, sport: p.sport, athleteID: p.athleteID,
+                                     shoots: p.shoots, playsGoal: p.playsGoal, level: p.level)
         return AppData(
             id: p.id,
             profile: athlete,
@@ -1021,17 +1046,29 @@ public struct RosterRow: Decodable, Hashable, Identifiable, Sendable {
     public var kind: RosterKind
     public var name: String
     public var joinCode: String?
+    public var sport: Sport
 
-    public init(id: UUID, kind: RosterKind, name: String, joinCode: String?) {
+    public init(id: UUID, kind: RosterKind, name: String, joinCode: String?, sport: Sport = .lacrosse) {
         self.id = id
         self.kind = kind
         self.name = name
         self.joinCode = joinCode
+        self.sport = sport
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, name
+        case id, kind, name, sport
         case joinCode = "join_code"
+    }
+
+    /// Rosters made before hockey are lacrosse.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        kind = try c.decode(RosterKind.self, forKey: .kind)
+        name = try c.decode(String.self, forKey: .name)
+        joinCode = try c.decodeIfPresent(String.self, forKey: .joinCode)
+        sport = try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse
     }
 }
 
@@ -1058,18 +1095,41 @@ public struct CoachAthleteProfileRow: Decodable, Hashable, Sendable {
     public var benchmarkGroup: BenchmarkGroup?
     public var weeklyGoalHours: Double
     public var themeID: String
+    public var sport: Sport = .lacrosse
+    public var shoots: Handedness?
+    public var playsGoal: Bool = false
+    public var level: String = ""
 
     enum CodingKeys: String, CodingKey {
-        case id, positions
+        case id, positions, sport, shoots, level
         case firstName = "first_name", classYear = "class_year", benchmarkGroup = "benchmark_group"
-        case weeklyGoalHours = "weekly_goal_hours", themeID = "theme_id"
+        case weeklyGoalHours = "weekly_goal_hours", themeID = "theme_id", playsGoal = "plays_goal"
     }
 
     /// As a profile row, with blanks for what coaches don't see.
     var profileRow: ProfileRow {
         ProfileRow(id: id, firstName: firstName, classYear: classYear, positions: positions, benchmarkGroup: benchmarkGroup,
                    mentalCoachName: "", weeklyGoalHours: weeklyGoalHours, seasonLabel: "", seasonBudget: 0, themeID: themeID,
-                   bodyUnits: .imperial, usdToCAD: ExchangeRate.defaultUSDToCAD)
+                   bodyUnits: .imperial, usdToCAD: ExchangeRate.defaultUSDToCAD, sport: sport, shoots: shoots, playsGoal: playsGoal,
+                   level: level)
+    }
+}
+
+extension CoachAthleteProfileRow {
+    /// Before the sport profiles migration, the view has no sport or hockey details.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        firstName = try c.decode(String.self, forKey: .firstName)
+        classYear = try c.decodeIfPresent(Int.self, forKey: .classYear)
+        positions = try c.decode(String.self, forKey: .positions)
+        benchmarkGroup = try c.decodeIfPresent(BenchmarkGroup.self, forKey: .benchmarkGroup)
+        weeklyGoalHours = try c.decode(Double.self, forKey: .weeklyGoalHours)
+        themeID = try c.decode(String.self, forKey: .themeID)
+        sport = try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse
+        shoots = try c.decodeIfPresent(Handedness.self, forKey: .shoots)
+        playsGoal = try c.decodeIfPresent(Bool.self, forKey: .playsGoal) ?? false
+        level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
     }
 }
 
@@ -1101,11 +1161,11 @@ public struct AthleteCoachRow: Decodable, Hashable, Identifiable, Sendable {
 public enum CodeInfo: Equatable, Sendable, Decodable {
     /// An invite to link this account to an athlete.
     case invite(athleteName: String, relationship: Relationship)
-    /// A coach's roster to add an athlete to.
-    case roster(name: String, kind: RosterKind, coachName: String)
+    /// A coach's roster to add an athlete to. Only the athlete's profile for the roster's sport can join.
+    case roster(name: String, kind: RosterKind, coachName: String, sport: Sport = .lacrosse)
 
     private enum CodingKeys: String, CodingKey {
-        case type, athlete, relationship, roster, kind, coach
+        case type, athlete, relationship, roster, kind, coach, sport
     }
 
     public init(from decoder: Decoder) throws {
@@ -1116,7 +1176,8 @@ public enum CodeInfo: Equatable, Sendable, Decodable {
                            relationship: try c.decode(Relationship.self, forKey: .relationship))
         case "roster":
             self = .roster(name: try c.decode(String.self, forKey: .roster), kind: try c.decode(RosterKind.self, forKey: .kind),
-                           coachName: try c.decode(String.self, forKey: .coach))
+                           coachName: try c.decode(String.self, forKey: .coach),
+                           sport: try c.decodeIfPresent(Sport.self, forKey: .sport) ?? .lacrosse)
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown code type \(other)")
         }

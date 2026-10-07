@@ -154,7 +154,7 @@ public struct CloudSync: Sendable {
         case viewer
     }
 
-    /// Gives another LaxPocket account access to a profile, as a parent. The other person has to have signed up already.
+    /// Gives another SportsPocket account access to a profile, as a parent, and to the athlete's other sports. The other person has to have signed up already.
     public func share(profileID: UUID, email: String, role: ShareRole) async throws {
         _ = try await client.rpc("share_profile", params: [
             "p_profile_id": profileID.uuidString.lowercased(),
@@ -216,13 +216,30 @@ public struct CloudSync: Sendable {
         try await client.delete(InviteRow.table, where: "code", in: [code])
     }
 
-    /// Takes someone off an athlete (owner only), or this account off one it doesn't own.
-    public func removeMember(profileID: UUID, userID: UUID) async throws {
-        let deleted = try await client.delete(MemberRow.table, where: "user_id", in: [userID.uuidString.lowercased()],
-                                              filters: [URLQueryItem(name: "profile_id", value: "eq.\(profileID.uuidString.lowercased())")])
-        if deleted == 0 {
+    private struct MemberParams: Encodable, Sendable {
+        var p_profile_id: UUID
+        var p_user_id: UUID
+    }
+
+    /// Takes someone off an athlete (owner only), or this account off one it doesn't own. Family (a parent or the
+    /// athlete's own login) comes off every one of the athlete's sports; anyone else only off this one. Returns the
+    /// profiles they came off.
+    @discardableResult
+    public func removeMember(profileID: UUID, userID: UUID) async throws -> [UUID] {
+        let data = try await client.rpc("remove_from_athlete", encoded: MemberParams(p_profile_id: profileID, p_user_id: userID))
+        let removed = try JSONDecoder().decode([UUID].self, from: data)
+        if removed.isEmpty {
             throw CloudError.server(status: 403, code: "42501", message: "Only the athlete’s owner can remove people.")
         }
+        return removed
+    }
+
+    /// Gives a sport profile just added for an athlete the same family as their other sports: every parent and the
+    /// athlete's own login, never coaches. Owner only. Returns how many people were added.
+    @discardableResult
+    public func addFamilyToSport(profileID: UUID) async throws -> Int {
+        let data = try await client.rpc("add_family_to_sport", params: ["p_profile_id": profileID.uuidString.lowercased()])
+        return try JSONDecoder().decode(Int.self, from: data)
     }
 }
 
@@ -266,8 +283,8 @@ extension CloudSync {
         _ = try await client.rpc("set_mental_coach_trust", encoded: TrustParams(p_profile_id: profileID, p_coach_id: coachID, p_trusted: trusted))
     }
 
-    public func createRoster(name: String, kind: RosterKind) async throws -> UUID {
-        let data = try await client.rpc("create_roster", params: ["p_name": name, "p_kind": kind.rawValue])
+    public func createRoster(name: String, kind: RosterKind, sport: Sport = .lacrosse) async throws -> UUID {
+        let data = try await client.rpc("create_roster", params: ["p_name": name, "p_kind": kind.rawValue, "p_sport": sport.rawValue])
         return try JSONDecoder().decode(UUID.self, from: data)
     }
 
@@ -416,7 +433,7 @@ enum CoachWorkspace {
         }
         return rosters.map { roster in
             let onRoster = places.filter { $0.rosterID == roster.id }.compactMap { athletes[$0.profileID] }
-            return CoachRoster(id: roster.id, name: roster.name, kind: roster.kind, joinCode: roster.joinCode,
+            return CoachRoster(id: roster.id, name: roster.name, kind: roster.kind, sport: roster.sport, joinCode: roster.joinCode,
                                athletes: onRoster.sorted { $0.data.profile.firstName.localizedCaseInsensitiveCompare($1.data.profile.firstName) == .orderedAscending },
                                assignments: tasks.filter { $0.rosterID == roster.id }.reversed())
         }
@@ -436,7 +453,7 @@ public struct ProfilePerson: Hashable, Identifiable, Sendable {
     public var displayName: String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         if isMe { return trimmed.isEmpty ? "You" : "\(trimmed) (you)" }
-        return trimmed.isEmpty ? "LaxPocket account" : trimmed
+        return trimmed.isEmpty ? "SportsPocket account" : trimmed
     }
 }
 

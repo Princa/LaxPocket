@@ -221,7 +221,11 @@ final class CloudRowsTests: XCTestCase {
             XCTAssertTrue(Set(Row.conflictColumns).isSubset(of: encoded), "\(Row.table) conflict columns", file: file, line: line)
         }
         try check(snapshot.profile)
-        XCTAssertEqual(try keys(snapshot.profile), Set(ProfileRow.columns))
+        XCTAssertEqual(try keys(snapshot.profile), Set(ProfileRow.columns).subtracting(["athlete_id", "shoots"]),
+                       "a lacrosse athlete's first profile has neither")
+        var hockey = Fixtures.season().addingSport(.hockey)
+        hockey.profile.shoots = .left
+        XCTAssertEqual(try keys(ProfileRow(hockey)), Set(ProfileRow.columns).subtracting(["benchmark_group"]), "hockey has no NDTP group")
         try check(snapshot.programs[0])
         try check(snapshot.sessions[0])
         try check(snapshot.combineResults[0].result)

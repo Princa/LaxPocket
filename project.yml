@@ -38,7 +38,9 @@ targets:
     info:
       path: LaxPocket/Info.plist
       properties:
-        CFBundleDisplayName: LaxPocket
+        # The app is called SportsPocket on the phone. The project, bundle ID, URL scheme and code keep the LaxPocket
+        # name: a new bundle ID would install a separate app without the athletes saved on the phone.
+        CFBundleDisplayName: SportsPocket
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false

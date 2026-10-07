@@ -174,9 +174,14 @@ public struct TrainingSession: Identifiable, Codable, Hashable, Sendable {
         "Focus & reset", "Handling pressure", "Goal setting", "Game review"
     ]
 
-    /// Focus tags offered when logging a session of this category.
+    /// Focus tags offered when logging a lacrosse session of this category.
     public static func focusOptions(for category: SessionCategory) -> [String] {
         category == .mental ? mentalFocusOptions : focusOptions
+    }
+
+    /// Focus tags offered when logging a session of this category for an athlete, in their sport.
+    public static func focusOptions(for category: SessionCategory, athlete: AthleteProfile) -> [String] {
+        category == .mental ? mentalFocusOptions : athlete.focusOptions
     }
 }
 

@@ -51,7 +51,7 @@ struct CoachingView: View {
                 .buttonStyle(PrimaryButtonStyle(color: theme.primary))
                 .padding(.top, 8)
 
-                Text("Coaches see training, wall ball and events; mental coaches see the mental game too. Never the budget or height and weight.")
+                Text("Each roster is for one sport, and you see only the athlete's profile for it. Coaches see training and events (and wall ball in lacrosse); mental coaches see the mental game too. Never the budget, height and weight, or other sports.")
                     .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
             }
             .padding(.horizontal, 16)
@@ -106,7 +106,7 @@ struct CoachingView: View {
             }
         }
         .padding(.top, 8)
-        Text("\(roster.kind.title) · \(roster.athletes.count) athlete\(roster.athletes.count == 1 ? "" : "s")")
+        Text("\(roster.sport.title) · \(roster.kind.title) · \(roster.athletes.count) athlete\(roster.athletes.count == 1 ? "" : "s")")
             .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
 
         if roster.athletes.isEmpty {
@@ -244,8 +244,9 @@ struct CoachAthleteView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     ScreenTitle(text: data.profile.firstName.isEmpty ? "Athlete" : data.profile.firstName)
-                    if !data.profile.positions.isEmpty {
-                        Text(data.profile.positions).font(.system(size: 14)).foregroundStyle(AppTheme.muted)
+                    let details = [data.profile.positions, data.profile.level].filter { !$0.isEmpty }
+                    if !details.isEmpty {
+                        Text(details.joined(separator: " · ")).font(.system(size: 14)).foregroundStyle(AppTheme.muted)
                     }
                 }
 
@@ -279,18 +280,20 @@ struct CoachAthleteView: View {
                     }
                 }
 
-                Card {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Wall ball this week").font(.system(size: 15, weight: .semibold))
-                            Text("Right \(week.wallball.right) · left \(week.wallball.left) · both \(week.wallball.both)")
-                                .font(.system(size: 13)).foregroundStyle(AppTheme.caption)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(week.wallball.total)").font(.display(28)).foregroundStyle(AppTheme.ink)
-                            Text(week.wallballStreak > 0 ? "\(week.wallballStreak)-day streak" : "No streak")
-                                .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                if data.profile.sport.hasWallball {
+                    Card {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Wall ball this week").font(.system(size: 15, weight: .semibold))
+                                Text("Right \(week.wallball.right) · left \(week.wallball.left) · both \(week.wallball.both)")
+                                    .font(.system(size: 13)).foregroundStyle(AppTheme.caption)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("\(week.wallball.total)").font(.display(28)).foregroundStyle(AppTheme.ink)
+                                Text(week.wallballStreak > 0 ? "\(week.wallballStreak)-day streak" : "No streak")
+                                    .font(.system(size: 12)).foregroundStyle(AppTheme.caption)
+                            }
                         }
                     }
                 }
@@ -452,7 +455,7 @@ struct RosterManageView: View {
             } header: {
                 Text("Join code")
             } footer: {
-                Text("A parent enters the code and picks their athlete; that's their OK for you to see \(roster.kind == .team ? "training and events" : "training, events and the mental game"). A new code stops the old one working.")
+                Text("A parent enters the code and picks their athlete's \(roster.sport.title.lowercased()) profile; that's their OK for you to see \(roster.kind == .team ? "training and events" : "training, events and the mental game"). A new code stops the old one working.")
             }
 
             Section("Name") {
@@ -503,8 +506,8 @@ struct RosterManageView: View {
     }
 
     private func instructions(_ code: String) -> String {
-        "Add your athlete to \(roster.name) on LaxPocket: in Theme & settings → Cloud sync, tap Join with a code and enter \(InviteRow.displayCode(code)). "
-            + "Your coach will see \(roster.kind == .team ? "training, wall ball and events" : "training, events and the mental game"), never the budget or height and weight."
+        "Add your athlete to \(roster.name) on SportsPocket: in Theme & settings → Cloud sync, tap Join with a code and enter \(InviteRow.displayCode(code)). "
+            + "It's for your athlete's \(roster.sport.title.lowercased()) profile. Your coach will see: \(roster.kind.sharingSummary(for: roster.sport))"
     }
 
     private func setCode(open: Bool) {
@@ -548,6 +551,7 @@ struct NewRosterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var kind: RosterKind = .team
+    @State private var sport: Sport = .lacrosse
     @State private var isWorking = false
     @State private var message: String?
 
@@ -556,11 +560,14 @@ struct NewRosterView: View {
             Form {
                 Section {
                     TextField("Name, e.g. U15 Girls", text: $name)
+                    Picker("Sport", selection: $sport) {
+                        ForEach(Sport.allCases) { Text($0.title).tag($0) }
+                    }
                     Picker("Kind", selection: $kind) {
                         ForEach(RosterKind.allCases) { Text($0.title).tag($0) }
                     }
                 } footer: {
-                    Text("You'll see: \(kind.sharingSummary)")
+                    Text("Only athletes' \(sport.title.lowercased()) profiles can join. You'll see: \(kind.sharingSummary(for: sport))")
                 }
                 if let message {
                     Section { Text(message).foregroundStyle(.red) }
@@ -587,7 +594,7 @@ struct NewRosterView: View {
         message = nil
         Task {
             do {
-                try await cloud.createRoster(name: name.trimmingCharacters(in: .whitespaces), kind: kind)
+                try await cloud.createRoster(name: name.trimmingCharacters(in: .whitespaces), kind: kind, sport: sport)
                 dismiss()
             } catch {
                 message = error.localizedDescription

@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var showSettings = false
     @State private var showNewProfile = false
     @State private var showProfile = false
+    @State private var showAddSport = false
 
     var body: some View {
         let data = store.data
@@ -116,6 +117,7 @@ struct HomeView: View {
         .sheet(isPresented: $showLogSession) { LogSessionView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showNewProfile) { NewProfileView() }
+        .sheet(isPresented: $showAddSport) { NewProfileView(athlete: store.data) }
         .navigationDestination(isPresented: $showProfile) { AthleteProfileView() }
     }
 
@@ -151,15 +153,15 @@ struct HomeView: View {
             Text(profileLine)
                 .font(.system(size: 14))
                 .foregroundStyle(theme.onPrimary)
-            NavigationLink { AthleteProfileView() } label: {
-                Label("Edit profile", systemImage: "pencil")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 36)
-                    .background(Color.white.opacity(0.14), in: Capsule())
+            HStack(spacing: 8) {
+                NavigationLink { AthleteProfileView() } label: {
+                    headerCapsule(Label("Edit profile", systemImage: "pencil"))
+                }
+                .buttonStyle(.plain)
+                if store.athleteSports.count > 1 {
+                    sportSwitch
+                }
             }
-            .buttonStyle(.plain)
             .padding(.top, 4)
         }
         .padding(.horizontal, 20)
@@ -171,20 +173,55 @@ struct HomeView: View {
         }
     }
 
+    private func headerCapsule(_ label: some View) -> some View {
+        label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 36)
+            .background(Color.white.opacity(0.14), in: Capsule())
+    }
+
+    /// Switches to the athlete's profile for another sport, a completely separate view.
+    private var sportSwitch: some View {
+        Menu {
+            ForEach(store.athleteSports) { summary in
+                Button { store.switchProfile(to: summary.id) } label: {
+                    Label(summary.sport.title, systemImage: summary.id == store.data.id ? "checkmark" : summary.sport.symbolName)
+                }
+            }
+        } label: {
+            headerCapsule(HStack(spacing: 6) {
+                Image(systemName: store.sport.symbolName)
+                Text(store.sport.title)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
+            })
+        }
+        .accessibilityLabel("Sport: \(store.sport.title). Switch sport")
+    }
+
     private var profileMenu: some View {
         Menu {
-            Section("Athletes") {
-                ForEach(store.profiles) { summary in
-                    Button { store.switchProfile(to: summary.id) } label: {
-                        if summary.id == store.data.id {
-                            Label(summary.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(summary.displayName)
+            ForEach(store.index.athletes, id: \.first?.athleteKey) { sports in
+                Section(sports.count > 1 ? sports.first?.displayName ?? "" : "") {
+                    ForEach(sports) { summary in
+                        Button { store.switchProfile(to: summary.id) } label: {
+                            let name = sports.count > 1 ? summary.sport.title : summary.displayName
+                            if summary.id == store.data.id {
+                                Label(name, systemImage: "checkmark")
+                            } else {
+                                Label(name, systemImage: summary.sport.symbolName)
+                            }
                         }
                     }
                 }
             }
             Button { showProfile = true } label: { Label("Edit \(store.data.summary.displayName)’s profile", systemImage: "pencil") }
+            if !store.sportsToAdd(for: store.data.id).isEmpty {
+                Button { showAddSport = true } label: {
+                    Label("Add a sport for \(store.data.summary.displayName)", systemImage: "plus")
+                }
+            }
             Button { showNewProfile = true } label: { Label("Add athlete", systemImage: "person.badge.plus") }
             if cloud.isCoaching {
                 Section {
@@ -199,9 +236,11 @@ struct HomeView: View {
 
     private var profileLine: String {
         let p = store.profile
-        var parts = [p.season]
+        // An athlete with one sport sees it here; one with more has the sport switch.
+        var parts = store.athleteSports.count > 1 ? [p.season] : [p.sport.title, p.season]
         if let year = p.classYear { parts.append("Class of \(year)") }
         if !p.positions.isEmpty { parts.append(p.positions) }
+        if !p.level.isEmpty { parts.append(p.level) }
         if let height = BodyTrends.heights(store.data.bodyMeasurements).last { parts.append(p.bodyUnits.formatHeight(height.value)) }
         return parts.joined(separator: " · ")
     }
